@@ -1,9 +1,8 @@
 // server.js
 // Habesha Web Folder Manager (Windows + OneDrive folders)
-// Run: npm i express
+// Run local: npm i express
 // Then: node server.js
-// Open from PC: http://localhost:8787
-// Open from phone/iPad (same WiFi): http://YOUR-PC-IP:8787
+// Local: http://localhost:8787
 
 const express = require("express");
 const fs = require("fs");
@@ -17,26 +16,33 @@ app.use(express.json({ limit: "2mb" }));
 
 /**
  * ========= CONFIG =========
- * Change this to your Habesha base folder.
- * (Matches your AHK script)
+ * NOTE:
+ * - On Render, use Environment Variables:
+ *   AUTH_TOKEN=Habesha-2026-Secure   (example)
+ * - PORT is set by Render automatically.
  */
-const BASE = "C:\\Users\\wedaj\\OneDrive\\Documents\\Habesha";
+
+// IMPORTANT: this base path only works on YOUR Windows PC.
+// On Render (cloud) there is NO C:\ drive, so folder creation/opening won't work there.
+// This app is really meant to run on your PC if you need Windows Explorer + OneDrive folders.
+const BASE = process.env.BASE || "C:\\Users\\wedaj\\OneDrive\\Documents\\Habesha";
 const CLIENTS_BASE = path.join(BASE, "02 Clients");
 
-// Simple “password” for your web page (protect from anyone on WiFi)
-// Change it to something only you know
-const AUTH_TOKEN = "CHANGE_ME_12345";
+// Token comes from ENV first (Render), fallback for local dev
+const AUTH_TOKEN = process.env.AUTH_TOKEN || "CHANGE_ME_12345";
 
-// Port
-const PORT = 8787;
+// Port: Render sets PORT automatically
+const PORT = process.env.PORT || 8787;
 
 /**
  * ========= SECURITY =========
- * Every request must include:  X-Auth-Token: <AUTH_TOKEN>
+ * Every request must include: X-Auth-Token: <AUTH_TOKEN>
  */
 function requireAuth(req, res, next) {
   const token = req.headers["x-auth-token"];
-  if (token !== AUTH_TOKEN) return res.status(401).json({ error: "Unauthorized" });
+  if (!token || token !== AUTH_TOKEN) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
   next();
 }
 
@@ -63,7 +69,7 @@ async function fileExists(p) {
 }
 
 function openInExplorer(folderPath) {
-  // Opens on the Windows PC where server runs
+  // Works only on Windows where this server runs
   const cmd = `explorer.exe "${folderPath}"`;
   exec(cmd, () => {});
 }
@@ -102,8 +108,7 @@ async function saveTaxYears(years) {
 }
 
 function clientInfoTemplate(type) {
-  return (
-`Client Type: ${type}
+  return `Client Type: ${type}
 Client Status: Active
 Client Tag:
 Directors Count: 1
@@ -118,11 +123,12 @@ CRN:
 VAT Number:
 PAYE Reference:
 Notes:
-`
-  );
+`;
 }
 
-function boolToYesNo(b) { return b ? "Yes" : "No"; }
+function boolToYesNo(b) {
+  return b ? "Yes" : "No";
+}
 
 function buildClientTag({ type, bk, vat, paye, mtd, extra, directors }) {
   let tag = `${type}`;
@@ -245,12 +251,10 @@ async function deleteFolderIfExists(fullPath) {
 }
 
 async function applySelfEmployed(clientPath, flags, taxYears) {
-  // Proof of ID
   const idRoot = path.join(clientPath, "00 Proof of ID");
   ensureDir(idRoot);
   createIdPack(idRoot);
 
-  // Bookkeeping
   if (flags.bk) {
     const bkRoot = path.join(clientPath, "01 Bookkeeping");
     ensureDir(bkRoot);
@@ -260,7 +264,6 @@ async function applySelfEmployed(clientPath, flags, taxYears) {
     await createTaxYearFolders(path.join(bkRoot, "04 Expenses"), taxYears);
   }
 
-  // Compliance - Self Assessment
   const saRoot = path.join(clientPath, "02 Compliance", "01 Self Assessment");
   ensureDir(saRoot);
   for (const y of taxYears) {
@@ -269,7 +272,6 @@ async function applySelfEmployed(clientPath, flags, taxYears) {
     createSA_Subfolders(yp);
   }
 
-  // MTD / VAT / PAYE
   if (flags.mtd) await createTaxYearFolders(path.join(clientPath, "02 Compliance", "02 MTD (ITSA)"), taxYears);
   if (flags.vat) await createTaxYearFolders(path.join(clientPath, "02 Compliance", "03 VAT"), taxYears);
   if (flags.paye) await createTaxYearFolders(path.join(clientPath, "02 Compliance", "04 PAYE"), taxYears);
@@ -307,7 +309,6 @@ async function applyLandlord(clientPath, flags, taxYears) {
   }
 
   if (flags.mtd) await createTaxYearFolders(path.join(clientPath, "02 Compliance", "03 MTD (ITSA)"), taxYears);
-
   if (flags.extra) ensureExtraService(clientPath);
 }
 
@@ -376,20 +377,15 @@ async function applyOtherClient(clientPath, flags) {
 }
 
 async function applyClientStructure(clientPath, flags, taxYears) {
-  // Handle opt-out deletes (only service areas)
-  // Bookkeeping
   if (!flags.bk) await deleteFolderIfExists(path.join(clientPath, "01 Bookkeeping"));
 
-  // Extra service
   if (!flags.extra) {
     await deleteFolderIfExists(path.join(clientPath, "03 Other Services", "01 Other extra-service"));
-    // remove parent if empty-ish
-    const otherRoot = path.join(clientPath, "03 Other Services");
-    // ignore errors
-    try { await fsp.rmdir(otherRoot); } catch {}
+    try {
+      await fsp.rmdir(path.join(clientPath, "03 Other Services"));
+    } catch {}
   }
 
-  // Type-specific deletes for compliance services
   if (flags.type === "Self-Employed") {
     if (!flags.mtd) await deleteFolderIfExists(path.join(clientPath, "02 Compliance", "02 MTD (ITSA)"));
     if (!flags.vat) await deleteFolderIfExists(path.join(clientPath, "02 Compliance", "03 VAT"));
@@ -401,14 +397,12 @@ async function applyClientStructure(clientPath, flags, taxYears) {
   }
 
   if (flags.type === "Limited Company") {
-    // No MTD for Ltd
     flags.mtd = false;
     if (!flags.vat) await deleteFolderIfExists(path.join(clientPath, "02 Compliance", "03 VAT"));
     if (!flags.paye) await deleteFolderIfExists(path.join(clientPath, "02 Compliance", "04 PAYE"));
     await deleteExtraDirectorFolders(clientPath, flags.directors);
   }
 
-  // Apply structure
   if (flags.type === "Self-Employed") await applySelfEmployed(clientPath, flags, taxYears);
   else if (flags.type === "Landlord") await applyLandlord(clientPath, flags, taxYears);
   else if (flags.type === "Limited Company") await applyLimitedCompany(clientPath, flags, taxYears);
@@ -418,7 +412,6 @@ async function applyClientStructure(clientPath, flags, taxYears) {
 /**
  * ========= API =========
  */
-
 app.get("/api/status", requireAuth, async (req, res) => {
   res.json({ ok: true, base: BASE, clientsBase: CLIENTS_BASE, today: todayISO() });
 });
@@ -439,7 +432,6 @@ app.post("/api/open", requireAuth, async (req, res) => {
   const p = req.body?.path;
   if (!p || typeof p !== "string") return res.status(400).json({ error: "path required" });
 
-  // Safety: only allow opening inside BASE
   const resolved = path.resolve(p);
   const baseResolved = path.resolve(BASE);
   if (!resolved.startsWith(baseResolved)) return res.status(400).json({ error: "Path not allowed" });
@@ -469,28 +461,31 @@ app.post("/api/taxyears/add", requireAuth, async (req, res) => {
   years.push(y);
   await saveTaxYears(years);
 
-  // Create for all clients
   const clients = await listClients();
   for (const c of clients) {
     const p = path.join(CLIENTS_BASE, c);
-    // We can’t safely detect flags without parsing Client Info fully here, but we still create year folders
-    // by ensuring structures when client is updated/created.
-    // For now just create skeleton Self Assessment year folders if exists:
+
     const sa = path.join(p, "02 Compliance", "01 Self Assessment", y);
     ensureDir(sa);
     createSA_Subfolders(sa);
-    const prop = path.join(p, "02 Compliance", "02 Property Income", y);
-    if (fs.existsSync(path.join(p, "02 Compliance", "02 Property Income"))) {
+
+    const propRoot = path.join(p, "02 Compliance", "02 Property Income");
+    if (fs.existsSync(propRoot)) {
+      const prop = path.join(propRoot, y);
       ensureDir(prop);
       createProperty_Subfolders(prop);
     }
-    const ct = path.join(p, "02 Compliance", "01 Corporation Tax", y);
-    if (fs.existsSync(path.join(p, "02 Compliance", "01 Corporation Tax"))) {
+
+    const ctRoot = path.join(p, "02 Compliance", "01 Corporation Tax");
+    if (fs.existsSync(ctRoot)) {
+      const ct = path.join(ctRoot, y);
       ensureDir(ct);
       createCorpTax_Subfolders(ct);
     }
-    const acc = path.join(p, "02 Compliance", "02 Accounts", y);
-    if (fs.existsSync(path.join(p, "02 Compliance", "02 Accounts"))) {
+
+    const accRoot = path.join(p, "02 Compliance", "02 Accounts");
+    if (fs.existsSync(accRoot)) {
+      const acc = path.join(accRoot, y);
       ensureDir(acc);
       createAccounts_Subfolders(acc);
     }
@@ -500,7 +495,6 @@ app.post("/api/taxyears/add", requireAuth, async (req, res) => {
 });
 
 app.post("/api/base/create-missing", requireAuth, async (req, res) => {
-  // Create base folders recommended
   ensureDir(path.join(BASE, "01 Work", "01 Admin & Compliance"));
   ensureDir(path.join(BASE, "01 Work", "02 Templates"));
   ensureDir(path.join(BASE, "01 Work", "03 Marketing"));
@@ -522,7 +516,6 @@ app.post("/api/base/create-missing", requireAuth, async (req, res) => {
   }
 
   ensureDir(CLIENTS_BASE);
-
   res.json({ ok: true });
 });
 
@@ -537,7 +530,6 @@ app.post("/api/client/create", requireAuth, async (req, res) => {
 
   await ensureClientInfo(clientPath, type);
 
-  // Apply structure with flags
   const years = await loadTaxYears();
   const flags = {
     type,
@@ -587,7 +579,7 @@ app.post("/api/client/update", requireAuth, async (req, res) => {
 app.get("/", (req, res) => {
   res.type("html").send(`
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -599,12 +591,14 @@ app.get("/", (req, res) => {
     button:hover { background: #f6f6f6; }
     .row { display: flex; gap: 10px; flex-wrap: wrap; }
     input, select { padding: 10px; border-radius: 10px; border: 1px solid #ccc; width: 100%; max-width: 420px; }
-    label { display:block; margin-top: 10px; }
+    label { display:block; margin-top: 10px; font-weight: 600; }
     .small { font-size: 13px; color: #666; }
     .ok { color: #0a7; }
     .err { color: #c00; }
     .pill { display:inline-block; padding: 2px 8px; border:1px solid #ddd; border-radius: 999px; font-size:12px; margin-left:6px; }
     .grid { display:grid; grid-template-columns: 1fr; gap: 10px; }
+    .checkrow { display:flex; align-items:center; gap:10px; margin-top:10px; }
+    .checkrow label { margin: 0; font-weight: 500; display:flex; align-items:center; gap:10px; }
     @media(min-width: 900px){ .grid { grid-template-columns: 1fr 1fr; } }
   </style>
 </head>
@@ -614,13 +608,13 @@ app.get("/", (req, res) => {
 
   <div class="card">
     <h3>1) Login</h3>
-    <label>Token (X-Auth-Token)</label>
-    <input id="token" placeholder="Enter token..." />
+    <label for="token">Token (X-Auth-Token)</label>
+    <input id="token" name="token" autocomplete="off" placeholder="Enter token..." />
     <div class="row" style="margin-top:10px;">
-      <button onclick="saveToken()">Save Token</button>
-      <button onclick="loadAll()">Connect</button>
+      <button type="button" onclick="saveToken()">Save Token</button>
+      <button type="button" onclick="loadAll()">Connect</button>
     </div>
-    <div id="status" class="small"></div>
+    <div id="status" class="small" role="status" aria-live="polite"></div>
   </div>
 
   <div class="grid">
@@ -629,8 +623,8 @@ app.get("/", (req, res) => {
       <div id="folderBtns" class="row"></div>
       <div class="small">Tip: On mobile this triggers Explorer to open on your PC.</div>
       <div style="margin-top:10px;">
-        <button onclick="createBase()">Create Missing Base Folders</button>
-        <span id="baseMsg" class="small"></span>
+        <button type="button" onclick="createBase()">Create Missing Base Folders</button>
+        <span id="baseMsg" class="small" role="status" aria-live="polite"></span>
       </div>
     </div>
 
@@ -638,67 +632,91 @@ app.get("/", (req, res) => {
       <h3>3) Tax Years</h3>
       <div id="years" class="small"></div>
       <div class="row" style="margin-top:10px;">
-        <input id="newYear" placeholder="Add tax year e.g. 2026-27" />
-        <button onclick="addYear()">Add</button>
+        <label class="small" for="newYear" style="font-weight:600; margin-top:0;">Add tax year</label>
+        <input id="newYear" name="newYear" placeholder="e.g. 2026-27" />
+        <button type="button" onclick="addYear()">Add</button>
       </div>
-      <div id="yearMsg" class="small"></div>
+      <div id="yearMsg" class="small" role="status" aria-live="polite"></div>
     </div>
   </div>
 
   <div class="grid">
     <div class="card">
       <h3>4) Create New Client</h3>
-      <label>Client name</label>
-      <input id="cName" placeholder="e.g. Bright SG Ltd" />
-      <label>Client type</label>
-      <select id="cType" onchange="typeChanged()">
+
+      <label for="cName">Client name</label>
+      <input id="cName" name="cName" placeholder="e.g. Bright SG Ltd" />
+
+      <label for="cType">Client type</label>
+      <select id="cType" name="cType" onchange="typeChanged()">
         <option>Self-Employed</option>
         <option>Landlord</option>
         <option>Limited Company</option>
         <option>Other Client</option>
       </select>
 
-      <label>Directors (Limited Company)</label>
-      <input id="directors" type="number" min="1" value="1" />
+      <label for="directors">Directors (Limited Company)</label>
+      <input id="directors" name="directors" type="number" min="1" value="1" />
 
-      <label><input type="checkbox" id="bk" /> Bookkeeping</label>
-      <label><input type="checkbox" id="vat" /> VAT</label>
-      <label><input type="checkbox" id="paye" /> Payroll (PAYE)</label>
-      <label><input type="checkbox" id="mtd" /> MTD (ITSA)</label>
-      <label><input type="checkbox" id="extra" /> Other extra-service</label>
+      <div class="checkrow">
+        <label for="bk"><input type="checkbox" id="bk" /> Bookkeeping</label>
+      </div>
+      <div class="checkrow">
+        <label for="vat"><input type="checkbox" id="vat" /> VAT</label>
+      </div>
+      <div class="checkrow">
+        <label for="paye"><input type="checkbox" id="paye" /> Payroll (PAYE)</label>
+      </div>
+      <div class="checkrow">
+        <label for="mtd"><input type="checkbox" id="mtd" /> MTD (ITSA)</label>
+      </div>
+      <div class="checkrow">
+        <label for="extra"><input type="checkbox" id="extra" /> Other extra-service</label>
+      </div>
 
       <div class="row" style="margin-top:10px;">
-        <button onclick="createClient()">Create</button>
+        <button type="button" onclick="createClient()">Create</button>
       </div>
-      <div id="createMsg" class="small"></div>
+      <div id="createMsg" class="small" role="status" aria-live="polite"></div>
     </div>
 
     <div class="card">
       <h3>5) Update Client Registration</h3>
-      <label>Select client</label>
-      <select id="uClient"></select>
 
-      <label>Client type</label>
-      <select id="uType" onchange="uTypeChanged()">
+      <label for="uClient">Select client</label>
+      <select id="uClient" name="uClient"></select>
+
+      <label for="uType">Client type</label>
+      <select id="uType" name="uType" onchange="uTypeChanged()">
         <option>Self-Employed</option>
         <option>Landlord</option>
         <option>Limited Company</option>
         <option>Other Client</option>
       </select>
 
-      <label>Directors (Limited Company)</label>
-      <input id="uDirectors" type="number" min="1" value="1" />
+      <label for="uDirectors">Directors (Limited Company)</label>
+      <input id="uDirectors" name="uDirectors" type="number" min="1" value="1" />
 
-      <label><input type="checkbox" id="uBK" /> Bookkeeping</label>
-      <label><input type="checkbox" id="uVAT" /> VAT</label>
-      <label><input type="checkbox" id="uPAYE" /> Payroll (PAYE)</label>
-      <label><input type="checkbox" id="uMTD" /> MTD (ITSA)</label>
-      <label><input type="checkbox" id="uExtra" /> Other extra-service</label>
+      <div class="checkrow">
+        <label for="uBK"><input type="checkbox" id="uBK" /> Bookkeeping</label>
+      </div>
+      <div class="checkrow">
+        <label for="uVAT"><input type="checkbox" id="uVAT" /> VAT</label>
+      </div>
+      <div class="checkrow">
+        <label for="uPAYE"><input type="checkbox" id="uPAYE" /> Payroll (PAYE)</label>
+      </div>
+      <div class="checkrow">
+        <label for="uMTD"><input type="checkbox" id="uMTD" /> MTD (ITSA)</label>
+      </div>
+      <div class="checkrow">
+        <label for="uExtra"><input type="checkbox" id="uExtra" /> Other extra-service</label>
+      </div>
 
       <div class="row" style="margin-top:10px;">
-        <button onclick="updateClient()">Save / Apply</button>
+        <button type="button" onclick="updateClient()">Save / Apply</button>
       </div>
-      <div id="updateMsg" class="small"></div>
+      <div id="updateMsg" class="small" role="status" aria-live="polite"></div>
       <p class="small">Note: unticking a service removes its folders (Bookkeeping / VAT / PAYE / MTD / Extra).</p>
     </div>
   </div>
@@ -714,13 +732,13 @@ app.get("/", (req, res) => {
     document.getElementById("status").innerHTML = "<span class='ok'>Saved.</span>";
   }
 
-  async function api(path, options={}){
+  async function api(url, options={}){
     const token = getToken();
     const headers = Object.assign({}, options.headers||{}, {
       "Content-Type":"application/json",
       "X-Auth-Token": token
     });
-    const res = await fetch(path, Object.assign({}, options, { headers }));
+    const res = await fetch(url, Object.assign({}, options, { headers }));
     const data = await res.json().catch(()=> ({}));
     if(!res.ok) throw new Error(data.error || ("HTTP " + res.status));
     return data;
@@ -747,6 +765,7 @@ app.get("/", (req, res) => {
       wrap.innerHTML = "";
       f.folders.forEach(item=>{
         const b = document.createElement("button");
+        b.type = "button";
         b.textContent = item.name;
         b.onclick = ()=> openFolder(item.path);
         wrap.appendChild(b);
@@ -819,7 +838,6 @@ app.get("/", (req, res) => {
       };
       const out = await api("/api/client/create", { method:"POST", body: JSON.stringify(body) });
       msg.innerHTML = "<span class='ok'>Created:</span> " + out.path;
-
       await loadAll();
       document.getElementById("cName").value = "";
     }catch(e){
@@ -860,6 +878,6 @@ ensureDir(BASE);
 ensureDir(CLIENTS_BASE);
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Habesha web running on http://localhost:${PORT}`);
-  console.log(`Token (X-Auth-Token): ${AUTH_TOKEN}`);
+  console.log(`Habesha web running on port ${PORT}`);
+  console.log(`AUTH_TOKEN is set: ${AUTH_TOKEN ? "YES" : "NO"}`);
 });
