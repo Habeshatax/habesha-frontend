@@ -5,7 +5,6 @@ import express from "express";
 import fs from "fs";
 import path from "path";
 import os from "os";
-import cors from "cors";
 import { fileURLToPath } from "url";
 
 const app = express();
@@ -15,7 +14,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // ----- Middleware -----
-app.use(cors()); // allow frontend calls
 app.use(express.json({ limit: "25mb" }));
 
 // ----- Config -----
