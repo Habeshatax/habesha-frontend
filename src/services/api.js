@@ -1,41 +1,60 @@
 // src/services/api.js
 
-const API = import.meta.env.VITE_API_URL;
+const API_URL = (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "");
 
-// ---------- token helpers ----------
-function getToken() {
-  return localStorage.getItem("token") || sessionStorage.getItem("token");
-}
+// Basic fetch wrapper
+async function apiFetch(path, options = {}) {
+  const token = localStorage.getItem("token") || sessionStorage.getItem("token");
 
-function authHeaders(extra = {}) {
-  const token = getToken();
-  return {
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...extra,
+  const headers = {
+    ...(options.headers || {}),
   };
-}
 
-// ---------- generic JSON helper ----------
-export async function apiFetch(path, options = {}) {
-  const res = await fetch(`${API}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeaders(options.headers || {}),
-    },
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `HTTP ${res.status}`);
+  // JSON body handling
+  if (options.body && typeof options.body === "string") {
+    headers["Content-Type"] = headers["Content-Type"] || "application/json";
   }
 
-  const ct = res.headers.get("content-type") || "";
-  if (ct.includes("application/json")) return res.json();
-  return res.text();
+  // Auth header
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  const res = await fetch(`${API_URL}${path}`, {
+    ...options,
+    headers,
+  });
+
+  // If downloading a file, caller may want blob
+  if (options.expectBlob) {
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      throw new Error(txt || `Request failed (${res.status})`);
+    }
+    return res.blob();
+  }
+
+  const text = await res.text().catch(() => "");
+  let data = null;
+
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = { raw: text };
+  }
+
+  if (!res.ok) {
+    const msg = data?.error || data?.message || text || `Request failed (${res.status})`;
+    throw new Error(msg);
+  }
+
+  return data;
 }
 
-// ---------- auth ----------
+/* --------------------------
+   AUTH
+-------------------------- */
+
 export async function loginRequest(email, password) {
   return apiFetch("/login", {
     method: "POST",
@@ -47,24 +66,11 @@ export async function getMe() {
   return apiFetch("/api/me", { method: "GET" });
 }
 
-// ---------- clients ----------
-export async function listClients() {
-  return apiFetch("/api/clients", { method: "GET" });
-}
+/* --------------------------
+   FILE BROWSER
+-------------------------- */
 
-export async function createClient(payloadOrName) {
-  const payload =
-    typeof payloadOrName === "string"
-      ? { name: payloadOrName }
-      : payloadOrName;
-
-  return apiFetch("/api/clients", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
-// ---------- file browser ----------
+// List files/folders under client + path
 export async function listClientItems(client, path = "") {
   const qs = path ? `?path=${encodeURIComponent(path)}` : "";
   return apiFetch(`/api/clients/${encodeURIComponent(client)}/files${qs}`, {
@@ -72,71 +78,73 @@ export async function listClientItems(client, path = "") {
   });
 }
 
-// Upload base64 (optionally pass contentType)
-export async function uploadBase64(client, path = "", fileName, base64, contentType = "") {
+// Upload as base64 (expects base64 DATA URL string)
+export async function uploadBase64(client, path = "", fileName, base64) {
   const qs = path ? `?path=${encodeURIComponent(path)}` : "";
-  return apiFetch(
-    `/api/clients/${encodeURIComponent(client)}/uploadBase64${qs}`,
-    {
-      method: "POST",
-      body: JSON.stringify({ fileName, base64, contentType }),
-    }
-  );
-}
-
-export async function deleteFile(client, path = "", fileName) {
-  const qs =
-    `?file=${encodeURIComponent(fileName)}` +
-    (path ? `&path=${encodeURIComponent(path)}` : "");
-
-  return apiFetch(`/api/clients/${encodeURIComponent(client)}/file${qs}`, {
-    method: "DELETE",
+  return apiFetch(`/api/clients/${encodeURIComponent(client)}/uploadBase64${qs}`, {
+    method: "POST",
+    body: JSON.stringify({ fileName, base64 }),
   });
 }
 
-/**
- * Download with Authorization header
- */
-export async function downloadFile(client, path = "", fileName) {
-  const qs =
-    `?file=${encodeURIComponent(fileName)}` +
-    (path ? `&path=${encodeURIComponent(path)}` : "");
-
-  const token = getToken();
-  const res = await fetch(
-    `${API}/api/clients/${encodeURIComponent(client)}/download${qs}`,
-    {
-      method: "GET",
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    }
-  );
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `HTTP ${res.status}`);
-  }
-
-  return res.blob();
-}
-
-// ---------- NEW: create folder ----------
+// Create a folder
 export async function createFolder(client, path = "", folderName) {
   const qs = path ? `?path=${encodeURIComponent(path)}` : "";
   return apiFetch(`/api/clients/${encodeURIComponent(client)}/mkdir${qs}`, {
     method: "POST",
-    body: JSON.stringify({ name: folderName }),
+    body: JSON.stringify({ folderName }),
   });
 }
 
-// ---------- NEW: create text file ----------
-export async function createTextFile(client, path = "", fileName, text) {
+// Create a text file
+export async function createTextFile(client, path = "", fileName, content) {
   const qs = path ? `?path=${encodeURIComponent(path)}` : "";
-  return apiFetch(`/api/clients/${encodeURIComponent(client)}/writeText${qs}`, {
+  return apiFetch(`/api/clients/${encodeURIComponent(client)}/createText${qs}`, {
     method: "POST",
-    body: JSON.stringify({
-      fileName,
-      text,
-      contentType: "text/plain",
-    }),
+    body: JSON.stringify({ fileName, content }),
   });
+}
+
+// Delete a file
+export async function deleteFile(client, path = "", fileName) {
+  const qs = path ? `?path=${encodeURIComponent(path)}` : "";
+  return apiFetch(`/api/clients/${encodeURIComponent(client)}/delete${qs}`, {
+    method: "POST",
+    body: JSON.stringify({ fileName }),
+  });
+}
+
+// Download a file (returns Blob)
+export async function downloadFile(client, path = "", fileName) {
+  const qs = path ? `?path=${encodeURIComponent(path)}` : "";
+  return apiFetch(`/api/clients/${encodeURIComponent(client)}/download${qs}`, {
+    method: "POST",
+    body: JSON.stringify({ fileName }),
+    expectBlob: true,
+  });
+}
+// --------------------------
+// Backwards-compatible aliases (old names used in some pages)
+// --------------------------
+
+// listClientFiles -> listClientItems
+export async function listClientFiles(client, path = "") {
+  return listClientItems(client, path);
+}
+
+// uploadClientFileBase64 -> uploadBase64
+export async function uploadClientFileBase64(client, path = "", fileName, base64) {
+  return uploadBase64(client, path, fileName, base64);
+}
+
+// deleteClientFile -> deleteFile
+export async function deleteClientFile(client, path = "", fileName) {
+  return deleteFile(client, path, fileName);
+}
+
+// getDownloadUrl (your current API returns blob, not a URL)
+// We'll return a blob URL that the UI can use like a "download link"
+export async function getDownloadUrl(client, path = "", fileName) {
+  const blob = await downloadFile(client, path, fileName);
+  return URL.createObjectURL(blob);
 }

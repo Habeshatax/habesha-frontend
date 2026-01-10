@@ -3,11 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
-  deleteClientFile,
-  getDownloadUrl,
-  listClientFiles,
-  uploadClientFileBase64,
+  deleteFile,
+  downloadFile,
+  listClientItems,
+  uploadBase64,
 } from "../services/api";
+
 
 function fileToBase64DataUrl(file) {
   return new Promise((resolve, reject) => {
