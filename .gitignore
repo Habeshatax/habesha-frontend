@@ -1,2 +1,11 @@
 node_modules
 .env
+cd %USERPROFILE%\Desktop
+npm create vite@latest habesha-frontend -- --template react
+cd habesha-frontend
+npm install
+npm run dev
+
+
+
+
