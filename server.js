@@ -23,12 +23,8 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "")
 app.use(
   cors({
     origin: (origin, cb) => {
-      // allow non-browser tools (no origin)
-      if (!origin) return cb(null, true);
-
-      // if no allowlist set, allow all
+      if (!origin) return cb(null, true); // allow tools like curl/PS
       if (ALLOWED_ORIGINS.length === 0) return cb(null, true);
-
       if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
       return cb(new Error("CORS blocked for origin: " + origin));
     },
@@ -53,13 +49,12 @@ const JWT_SECRET = (process.env.JWT_SECRET || "").trim();
 
 /**
  * Storage directory
- * - On Render: attach a Disk and use /var/data/habesha (recommended)
- * - Without a disk: /tmp works but resets on redeploy
+ * - Render default here is /tmp (ephemeral). Prefer a Render Disk later and set BASE_DIR=/var/data/habesha
  */
 const BASE_DIR =
   process.env.BASE_DIR ||
   (process.env.RENDER
-    ? "/var/data/habesha"
+    ? "/tmp/habesha"
     : path.join(os.homedir(), "Documents", "Habesha"));
 
 const CLIENTS_DIR = path.join(BASE_DIR, "clients");
@@ -67,6 +62,12 @@ const CLIENTS_DIR = path.join(BASE_DIR, "clients");
 // ----- Helpers -----
 function ensureDir(p) {
   if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
+}
+
+function ensureDirs(base, relPaths) {
+  for (const rel of relPaths) {
+    ensureDir(path.join(base, rel));
+  }
 }
 
 function safeName(input) {
@@ -99,6 +100,16 @@ function verifyJwtToken(token) {
   }
 }
 
+function makeTaxYears(startYear, count) {
+  // folder names like "2024-25", "2025-26"
+  const years = [];
+  for (let i = 0; i < count; i++) {
+    const y = startYear + i;
+    years.push(`${y}-${String((y + 1) % 100).padStart(2, "0")}`);
+  }
+  return years;
+}
+
 // Protect only /api routes
 function requireAuth(req, res, next) {
   // If no auth configured, do not lock yourself out
@@ -107,7 +118,10 @@ function requireAuth(req, res, next) {
   const token = getBearer(req);
 
   // 1) Allow old fixed AUTH_TOKEN
-  if (AUTH_TOKEN && token === AUTH_TOKEN) return next();
+  if (AUTH_TOKEN && token === AUTH_TOKEN) {
+    req.user = { id: "legacy", email: "legacy@token", role: "admin" };
+    return next();
+  }
 
   // 2) Allow JWT
   const payload = verifyJwtToken(token);
@@ -135,9 +149,14 @@ app.get("/api/health", (req, res) =>
 
 // ----- Home -----
 app.get("/", (req, res) => {
+  res.status(200).send("HabeshaWeb backend is running. Try /health or /api/health");
+});
+
+// Helpful (so browser doesn't say Cannot GET /login)
+app.get("/login", (req, res) => {
   res
     .status(200)
-    .send("HabeshaWeb backend is running. Try /health or /api/health");
+    .send("Use POST /login with JSON body { email, password }. This is an API endpoint.");
 });
 
 // ----- LOGIN (PUBLIC) -----
@@ -174,8 +193,13 @@ app.post("/login", (req, res) => {
   }
 });
 
-// ----- API -----
+// ----- API (protected) -----
 app.use("/api", requireAuth);
+
+// /api/me (returns who the token belongs to)
+app.get("/api/me", (req, res) => {
+  return res.json({ ok: true, user: req.user || null });
+});
 
 // List clients (folders)
 app.get("/api/clients", (req, res) => {
@@ -192,19 +216,55 @@ app.get("/api/clients", (req, res) => {
   }
 });
 
-// Create client folder
+// Create client folder + standard structure
 app.post("/api/clients", (req, res) => {
   try {
     const name = safeName(req.body?.name);
-    if (!name)
+    if (!name) {
       return res.status(400).json({ ok: false, error: "Client name required" });
+    }
 
     const clientPath = resolveInside(CLIENTS_DIR, name);
     ensureDir(clientPath);
 
-    res.json({ ok: true, client: name });
+    // ---- Standard structure ----
+    const folders = [
+      "00 Engagement Letter",
+      "01 Proof of ID/01 Passport - BRP - eVisa",
+      "01 Proof of ID/02 Proof of Address",
+      "01 Proof of ID/03 Signed Engagement Letter",
+      "02 Compliance",
+      "03 Bookkeeping",
+      "04 Payroll",
+      "05 VAT",
+      "06 Corporation Tax",
+      "07 Self Assessment",
+      "08 Home Office Applications",
+      "99 Other",
+    ];
+
+    ensureDirs(clientPath, folders);
+
+    // ---- Optional: create Self Assessment tax years (last 3) ----
+    const saBase = path.join(clientPath, "07 Self Assessment");
+    const thisYear = new Date().getFullYear();
+    const taxYears = makeTaxYears(thisYear - 2, 3);
+
+    for (const ty of taxYears) {
+      ensureDirs(saBase, [
+        `${ty}/01 Income`,
+        `${ty}/02 Expenses`,
+        `${ty}/03 Bank Statements`,
+        `${ty}/04 CIS Statements`,
+        `${ty}/05 Pensions & Benefits`,
+        `${ty}/06 Other`,
+        `${ty}/99 Final & Submitted`,
+      ]);
+    }
+
+    return res.json({ ok: true, client: name, created: true });
   } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
+    return res.status(500).json({ ok: false, error: e.message });
   }
 });
 
@@ -231,16 +291,15 @@ app.get("/api/clients/:client/download", (req, res) => {
   try {
     const client = safeName(req.params.client);
     const file = String(req.query.file || "");
-    if (!file)
-      return res.status(400).json({ ok: false, error: "file query required" });
+    if (!file) return res.status(400).json({ ok: false, error: "file query required" });
 
     const clientPath = resolveInside(CLIENTS_DIR, client);
     const full = resolveInside(clientPath, file);
 
-    if (!fs.existsSync(full))
-      return res.status(404).json({ ok: false, error: "Not found" });
-    if (fs.statSync(full).isDirectory())
+    if (!fs.existsSync(full)) return res.status(404).json({ ok: false, error: "Not found" });
+    if (fs.statSync(full).isDirectory()) {
       return res.status(400).json({ ok: false, error: "Not a file" });
+    }
 
     res.download(full);
   } catch (e) {
@@ -256,10 +315,8 @@ app.post("/api/clients/:client/uploadBase64", (req, res) => {
     const fileName = safeName(req.body?.fileName);
     const base64Input = String(req.body?.base64 || "");
 
-    if (!fileName)
-      return res.status(400).json({ ok: false, error: "fileName required" });
-    if (!base64Input)
-      return res.status(400).json({ ok: false, error: "base64 required" });
+    if (!fileName) return res.status(400).json({ ok: false, error: "fileName required" });
+    if (!base64Input) return res.status(400).json({ ok: false, error: "base64 required" });
 
     const clientPath = resolveInside(CLIENTS_DIR, client);
     ensureDir(clientPath);
@@ -284,16 +341,15 @@ app.delete("/api/clients/:client/file", (req, res) => {
   try {
     const client = safeName(req.params.client);
     const file = String(req.query.file || "");
-    if (!file)
-      return res.status(400).json({ ok: false, error: "file query required" });
+    if (!file) return res.status(400).json({ ok: false, error: "file query required" });
 
     const clientPath = resolveInside(CLIENTS_DIR, client);
     const full = resolveInside(clientPath, file);
 
-    if (!fs.existsSync(full))
-      return res.status(404).json({ ok: false, error: "Not found" });
-    if (fs.statSync(full).isDirectory())
+    if (!fs.existsSync(full)) return res.status(404).json({ ok: false, error: "Not found" });
+    if (fs.statSync(full).isDirectory()) {
       return res.status(400).json({ ok: false, error: "Not a file" });
+    }
 
     fs.unlinkSync(full);
     res.json({ ok: true, deleted: file });
