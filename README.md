@@ -1,2 +1,2 @@
-# Habesha Web Frontend
-React + Vite frontend for Habesha Tax & Support.
+# habesha-frontend
+React + Vite frontend for HabeshaWeb
