@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { loginRequest, getMe } from "../services/api";
+
 // --------------------------------------------
 // Helpers for token storage
 // --------------------------------------------
@@ -38,14 +39,25 @@ export function AuthProvider({ children }) {
   // Login (calls POST /login)
   // backend returns: { ok:true, token, user }
   const login = async ({ email, password, remember = true }) => {
-    const data = await loginRequest(email, password);
+    const cleanEmail = String(email || "").trim().toLowerCase();
+    const cleanPassword = String(password || "").trim();
 
-    // if your backend returns ok:false, apiFetch already throws
+    if (!cleanEmail || !cleanPassword) {
+      throw new Error("Please enter email and password");
+    }
+
+    const data = await loginRequest(cleanEmail, cleanPassword);
+
+    // ✅ Guard against unexpected/null responses
+    if (!data || !data.token) {
+      throw new Error("Login failed: token not returned by server");
+    }
+
     saveToken(data.token, remember);
     setToken(data.token);
     setUser(data.user || null);
 
-    return data;
+    return data; // { ok, token, user }
   };
 
   // Logout
@@ -66,13 +78,11 @@ export function AuthProvider({ children }) {
         return;
       }
 
-      // token exists locally; validate by calling /api/me
       try {
         const me = await getMe(); // expected: { ok:true, user }
         setToken(t);
-        setUser(me.user || null);
-      } catch (err) {
-        // token invalid/expired or backend error
+        setUser(me?.user || null);
+      } catch {
         clearToken();
         setToken(null);
         setUser(null);

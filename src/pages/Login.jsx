@@ -1,4 +1,3 @@
-// src/pages/Login.jsx
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -14,18 +13,33 @@ export default function Login() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  // If already logged in, go dashboard
+  // If already logged in, redirect to dashboard
   useEffect(() => {
-    if (!loading && isLoggedIn) navigate("/dashboard", { replace: true });
+    if (!loading && isLoggedIn) {
+      navigate("/dashboard", { replace: true });
+    }
   }, [loading, isLoggedIn, navigate]);
 
   async function handleSubmit(e) {
     e.preventDefault();
     setError("");
+
+    if (!email || !password) {
+      setError("Please enter email and password");
+      return;
+    }
+
     setSubmitting(true);
 
     try {
-      await login({ email, password, remember });
+      // login() must return a result or throw
+      const result = await login({ email, password, remember });
+
+      // SAFETY: ensure token exists
+      if (!result || !result.token) {
+        throw new Error("Login failed: no token returned");
+      }
+
       navigate("/dashboard", { replace: true });
     } catch (err) {
       setError(err?.message || "Login failed");
@@ -76,13 +90,21 @@ export default function Login() {
         </label>
 
         <div style={{ marginTop: 12 }}>
-          <button type="submit" disabled={submitting} style={{ padding: "10px 14px" }}>
+          <button
+            type="submit"
+            disabled={submitting}
+            style={{ padding: "10px 14px" }}
+          >
             {submitting ? "Logging in…" : "Login"}
           </button>
         </div>
       </form>
 
-      {error && <p style={{ color: "red", marginTop: 12 }}>{error}</p>}
+      {error && (
+        <p style={{ color: "red", marginTop: 12, whiteSpace: "pre-wrap" }}>
+          {error}
+        </p>
+      )}
     </div>
   );
 }
