@@ -18,7 +18,7 @@ export default function Dashboard() {
   const [services, setServices] = useState({
     self_assessment: false,
     landlords: false,
-    limited_company: true, // default true since businessType default is limited_company
+    limited_company: true,
     payroll: true,
     vat_mtd: false,
     bookkeeping: true,
@@ -48,18 +48,19 @@ export default function Dashboard() {
     return tabs.find((t) => t.key === activeTab)?.path || "";
   }, [activeTab, tabs]);
 
-  // ✅ If user is not logged in, bounce to /login
+  // ✅ If user is not logged in, bounce to /login (hard redirect avoids blank page)
   useEffect(() => {
     const token = localStorage.getItem("token") || sessionStorage.getItem("token");
-    if (!token) navigate("/login", { replace: true });
-  }, [navigate]);
+    if (!token) {
+      window.location.replace("/login");
+    }
+  }, []);
 
   // Keep services aligned with businessType (helpful defaults)
   useEffect(() => {
     setServices((prev) => {
       const next = { ...prev };
 
-      // force the “main” service for the chosen business type
       if (businessType === "self_assessment") {
         next.self_assessment = true;
         next.landlords = false;
@@ -73,11 +74,19 @@ export default function Dashboard() {
         next.self_assessment = false;
         next.landlords = false;
       }
+
       return next;
     });
   }, [businessType]);
 
   async function refreshClients(keepSelection = true) {
+    const token = localStorage.getItem("token") || sessionStorage.getItem("token");
+    if (!token) {
+      // if token missing, redirect to login
+      window.location.replace("/login");
+      return;
+    }
+
     setLoadingClients(true);
     setErr("");
     setMsg("");
@@ -93,7 +102,17 @@ export default function Dashboard() {
         setSelectedClient(list[0] || "");
       }
     } catch (e) {
-      setErr(String(e.message || e));
+      const message = String(e?.message || e);
+
+      // If backend says unauthorized, force login
+      if (message.toLowerCase().includes("unauthorized")) {
+        localStorage.removeItem("token");
+        sessionStorage.removeItem("token");
+        window.location.replace("/login");
+        return;
+      }
+
+      setErr(message);
     } finally {
       setLoadingClients(false);
     }
@@ -121,6 +140,12 @@ export default function Dashboard() {
     const name = newClient.trim();
     if (!name) return;
 
+    const token = localStorage.getItem("token") || sessionStorage.getItem("token");
+    if (!token) {
+      window.location.replace("/login");
+      return;
+    }
+
     setErr("");
     setMsg("");
     setCreating(true);
@@ -128,7 +153,7 @@ export default function Dashboard() {
     try {
       const payload = {
         name,
-        businessType, // "self_assessment" | "landlords" | "limited_company"
+        businessType,
         services: selectedServicesArray(),
       };
 
@@ -139,16 +164,24 @@ export default function Dashboard() {
       await refreshClients(false);
       setSelectedClient(data.client);
 
-      // jump to Compliance tab after creation (nice UX)
       setActiveTab("comp");
     } catch (e2) {
-      setErr(String(e2.message || e2));
+      const message = String(e2?.message || e2);
+
+      if (message.toLowerCase().includes("unauthorized")) {
+        localStorage.removeItem("token");
+        sessionStorage.removeItem("token");
+        window.location.replace("/login");
+        return;
+      }
+
+      setErr(message);
     } finally {
       setCreating(false);
     }
   }
 
-  // ✅ Logout should be client-side only: clear token and go to /login
+  // ✅ Logout: hard redirect fixes the occasional blank screen
   function logout() {
     localStorage.removeItem("token");
     sessionStorage.removeItem("token");
@@ -156,7 +189,7 @@ export default function Dashboard() {
     setSelectedClient("");
     setErr("");
     setMsg("");
-    navigate("/login", { replace: true });
+    window.location.replace("/login");
   }
 
   return (
@@ -211,7 +244,7 @@ export default function Dashboard() {
                       type="checkbox"
                       checked={services.self_assessment}
                       onChange={() => toggleService("self_assessment")}
-                      disabled={businessType === "self_assessment"} // forced on
+                      disabled={businessType === "self_assessment"}
                     />
                     Self Assessment
                   </label>
@@ -221,7 +254,7 @@ export default function Dashboard() {
                       type="checkbox"
                       checked={services.landlords}
                       onChange={() => toggleService("landlords")}
-                      disabled={businessType === "landlords"} // forced on
+                      disabled={businessType === "landlords"}
                     />
                     Landlords
                   </label>
@@ -231,7 +264,7 @@ export default function Dashboard() {
                       type="checkbox"
                       checked={services.limited_company}
                       onChange={() => toggleService("limited_company")}
-                      disabled={businessType === "limited_company"} // forced on
+                      disabled={businessType === "limited_company"}
                     />
                     Limited Company
                   </label>
@@ -246,12 +279,20 @@ export default function Dashboard() {
                   </label>
 
                   <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <input type="checkbox" checked={services.vat_mtd} onChange={() => toggleService("vat_mtd")} />
+                    <input
+                      type="checkbox"
+                      checked={services.vat_mtd}
+                      onChange={() => toggleService("vat_mtd")}
+                    />
                     MTD VAT
                   </label>
 
                   <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <input type="checkbox" checked={services.payroll} onChange={() => toggleService("payroll")} />
+                    <input
+                      type="checkbox"
+                      checked={services.payroll}
+                      onChange={() => toggleService("payroll")}
+                    />
                     Payroll
                   </label>
 
@@ -277,7 +318,11 @@ export default function Dashboard() {
             <div>Loading clients…</div>
           ) : (
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <select style={{ flex: 1, padding: 8 }} value={selectedClient} onChange={(e) => setSelectedClient(e.target.value)}>
+              <select
+                style={{ flex: 1, padding: 8 }}
+                value={selectedClient}
+                onChange={(e) => setSelectedClient(e.target.value)}
+              >
                 <option value="">-- select --</option>
                 {clients.map((c) => (
                   <option key={c} value={c}>
@@ -325,7 +370,9 @@ export default function Dashboard() {
 
         <div style={{ marginTop: 12 }}>
           {!selectedClient ? (
-            <div style={{ padding: 16, border: "1px dashed #bbb", borderRadius: 8 }}>Select a client to view folders.</div>
+            <div style={{ padding: 16, border: "1px dashed #bbb", borderRadius: 8 }}>
+              Select a client to view folders.
+            </div>
           ) : (
             <ServiceFileBrowser client={selectedClient} basePath={activePath} />
           )}
