@@ -7,11 +7,10 @@ import { loginRequest, getMe } from "../services/api";
 // Helpers for token storage
 // --------------------------------------------
 function readToken() {
-  return localStorage.getItem("token") || sessionStorage.getItem("token");
+  return localStorage.getItem("token") || sessionStorage.getItem("token") || "";
 }
 
 function saveToken(token, remember = true) {
-  // clear both first
   localStorage.removeItem("token");
   sessionStorage.removeItem("token");
 
@@ -30,10 +29,11 @@ function clearToken() {
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [token, setToken] = useState(readToken());
+  const [token, setToken] = useState(readToken()); // boot from storage
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // ✅ Logged in if token exists. (User may load after /api/me)
   const isLoggedIn = !!token;
 
   // Login (calls POST /login)
@@ -48,50 +48,70 @@ export function AuthProvider({ children }) {
 
     const data = await loginRequest(cleanEmail, cleanPassword);
 
-    // ✅ Guard against unexpected/null responses
-    if (!data || !data.token) {
+    if (!data?.token) {
       throw new Error("Login failed: token not returned by server");
     }
 
     saveToken(data.token, remember);
+
+    // ✅ update state immediately
     setToken(data.token);
     setUser(data.user || null);
 
-    return data; // { ok, token, user }
+    return data;
   };
 
-  // Logout
+  // Logout (client-side only)
   const logout = () => {
     clearToken();
-    setToken(null);
+    setToken("");
     setUser(null);
   };
 
   // On app load/refresh:
   // If token exists -> call /api/me to validate + load user
   useEffect(() => {
+    let cancelled = false;
+
     const init = async () => {
+      setLoading(true);
+
       const t = readToken();
 
       if (!t) {
-        setLoading(false);
+        if (!cancelled) {
+          setToken("");
+          setUser(null);
+          setLoading(false);
+        }
         return;
       }
 
       try {
+        // token exists locally; validate by calling /api/me
         const me = await getMe(); // expected: { ok:true, user }
-        setToken(t);
-        setUser(me?.user || null);
+
+        if (!cancelled) {
+          setToken(t);
+          setUser(me?.user || null);
+        }
       } catch {
+        // token invalid/expired OR backend said 401
         clearToken();
-        setToken(null);
-        setUser(null);
+        if (!cancelled) {
+          setToken("");
+          setUser(null);
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
     init();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const value = useMemo(
