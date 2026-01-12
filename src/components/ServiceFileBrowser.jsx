@@ -4,11 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import {
   listClientItems,
   uploadBase64,
-  deleteFile,
   downloadFile,
   createFolder,
   createTextFile,
+  trashFile,
 } from "../services/api";
+
 
 function normalize(p) {
   return String(p || "")
@@ -151,24 +152,21 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
     }
   }
 
-  async function handleDelete(name) {
-    if (!perms.canDelete) {
-      setErr("Delete is disabled in this tab.");
-      return;
-    }
+  async function handleTrash(name) {
+  if (!confirm(`Move "${name}" to Trash?`)) return;
 
-    if (!confirm(`Delete "${name}"?`)) return;
-    setErr("");
-    setMsg("Deleting...");
-    try {
-      await deleteFile(client, path, name);
-      setMsg("Deleted ✅");
-      await refresh(path);
-    } catch (ex) {
-      setMsg("");
-      setErr(String(ex.message || ex));
-    }
+  setErr("");
+  setMsg("Moving to Trash...");
+
+  try {
+    await trashFile(client, path, name);
+    setMsg("Moved to Trash ✅");
+    await refresh(path);
+  } catch (ex) {
+    setMsg("");
+    setErr(String(ex.message || ex));
   }
+}
 
   async function handleDownload(name) {
     setErr("");
@@ -391,9 +389,8 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
                     {it.type === "file" ? (
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                         <button onClick={() => handleDownload(it.name)}>Download</button>
-                        <button onClick={() => handleDelete(it.name)} disabled={!perms.canDelete}>
-                          Delete
-                        </button>
+                        <button onClick={() => handleTrash(it.name)}>Trash</button>
+
                       </div>
                     ) : (
                       <span style={{ color: "#999" }}>—</span>

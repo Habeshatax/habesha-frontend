@@ -38,6 +38,7 @@ export default function Dashboard() {
       { key: "work", label: "Work", path: "03 Work" },
       { key: "personal", label: "Personal", path: "04 Personal" },
       { key: "downloads", label: "Downloads", path: "05 Downloads" },
+      { key: "trash", label: "Trash", path: "05 Downloads/_Trash" },
     ],
     []
   );
@@ -45,16 +46,16 @@ export default function Dashboard() {
   // ✅ Tab permissions (lock folders per service)
   // You can change these anytime.
   const tabPermissions = useMemo(
-    () => ({
-      eng: { canUpload: false, canDelete: false, canMkdir: false, canWriteText: false }, // read-only
-      id: { canUpload: true, canDelete: false, canMkdir: true, canWriteText: true }, // safer (no delete)
-      comp: { canUpload: true, canDelete: true, canMkdir: true, canWriteText: true },
-      work: { canUpload: true, canDelete: true, canMkdir: true, canWriteText: true },
-      personal: { canUpload: true, canDelete: true, canMkdir: true, canWriteText: true },
-      downloads: { canUpload: true, canDelete: true, canMkdir: true, canWriteText: true },
-    }),
-    []
-  );
+  () => ({
+    eng: { canUpload: false, canDelete: false, canMkdir: false, canWriteText: false }, // read-only
+    id: { canUpload: true, canDelete: false, canMkdir: true, canWriteText: true },     // no delete
+    comp: { canUpload: true, canDelete: true, canMkdir: true, canWriteText: true },    // full
+    work: { canUpload: true, canDelete: true, canMkdir: true, canWriteText: true },    // full
+    personal: { canUpload: true, canDelete: false, canMkdir: true, canWriteText: true }, // safer
+    downloads: { canUpload: true, canDelete: true, canMkdir: true, canWriteText: true }, // full
+  }),
+  []
+);
 
   const [activeTab, setActiveTab] = useState(tabs[0].key);
 

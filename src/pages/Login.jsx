@@ -24,7 +24,8 @@ export default function Login() {
     e.preventDefault();
     setError("");
 
-    if (!email || !password) {
+    const em = email.trim();
+    if (!em || !password) {
       setError("Please enter email and password");
       return;
     }
@@ -32,17 +33,17 @@ export default function Login() {
     setSubmitting(true);
 
     try {
-      // login() must return a result or throw
-      const result = await login({ email, password, remember });
+      const result = await login({ email: em, password, remember });
 
-      // SAFETY: ensure token exists
       if (!result || !result.token) {
         throw new Error("Login failed: no token returned");
       }
 
       navigate("/dashboard", { replace: true });
     } catch (err) {
-      setError(err?.message || "Login failed");
+      // Keep message simple for fetch/CORS issues
+      const msg = String(err?.message || "Login failed");
+      setError(msg === "Failed to fetch" ? "Failed to fetch" : msg);
     } finally {
       setSubmitting(false);
     }
@@ -62,7 +63,10 @@ export default function Login() {
             name="email"
             placeholder="Email"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              if (error) setError("");
+            }}
             style={{ width: "100%", padding: 10 }}
             autoComplete="email"
           />
@@ -74,7 +78,10 @@ export default function Login() {
             type="password"
             placeholder="Password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(e) => {
+              setPassword(e.target.value);
+              if (error) setError("");
+            }}
             style={{ width: "100%", padding: 10 }}
             autoComplete="current-password"
           />
@@ -90,11 +97,7 @@ export default function Login() {
         </label>
 
         <div style={{ marginTop: 12 }}>
-          <button
-            type="submit"
-            disabled={submitting}
-            style={{ padding: "10px 14px" }}
-          >
+          <button type="submit" disabled={submitting} style={{ padding: "10px 14px" }}>
             {submitting ? "Logging in…" : "Login"}
           </button>
         </div>
