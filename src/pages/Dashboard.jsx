@@ -48,6 +48,12 @@ export default function Dashboard() {
     return tabs.find((t) => t.key === activeTab)?.path || "";
   }, [activeTab, tabs]);
 
+  // ✅ If user is not logged in, bounce to /login
+  useEffect(() => {
+    const token = localStorage.getItem("token") || sessionStorage.getItem("token");
+    if (!token) navigate("/login", { replace: true });
+  }, [navigate]);
+
   // Keep services aligned with businessType (helpful defaults)
   useEffect(() => {
     setServices((prev) => {
@@ -75,6 +81,7 @@ export default function Dashboard() {
     setLoadingClients(true);
     setErr("");
     setMsg("");
+
     try {
       const data = await listClients();
       const list = data.clients || [];
@@ -141,10 +148,15 @@ export default function Dashboard() {
     }
   }
 
+  // ✅ Logout should be client-side only: clear token and go to /login
   function logout() {
     localStorage.removeItem("token");
     sessionStorage.removeItem("token");
-    navigate("/", { replace: true });
+    setClients([]);
+    setSelectedClient("");
+    setErr("");
+    setMsg("");
+    navigate("/login", { replace: true });
   }
 
   return (
@@ -234,20 +246,12 @@ export default function Dashboard() {
                   </label>
 
                   <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <input
-                      type="checkbox"
-                      checked={services.vat_mtd}
-                      onChange={() => toggleService("vat_mtd")}
-                    />
+                    <input type="checkbox" checked={services.vat_mtd} onChange={() => toggleService("vat_mtd")} />
                     MTD VAT
                   </label>
 
                   <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <input
-                      type="checkbox"
-                      checked={services.payroll}
-                      onChange={() => toggleService("payroll")}
-                    />
+                    <input type="checkbox" checked={services.payroll} onChange={() => toggleService("payroll")} />
                     Payroll
                   </label>
 
@@ -273,11 +277,7 @@ export default function Dashboard() {
             <div>Loading clients…</div>
           ) : (
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <select
-                style={{ flex: 1, padding: 8 }}
-                value={selectedClient}
-                onChange={(e) => setSelectedClient(e.target.value)}
-              >
+              <select style={{ flex: 1, padding: 8 }} value={selectedClient} onChange={(e) => setSelectedClient(e.target.value)}>
                 <option value="">-- select --</option>
                 {clients.map((c) => (
                   <option key={c} value={c}>
@@ -325,9 +325,7 @@ export default function Dashboard() {
 
         <div style={{ marginTop: 12 }}>
           {!selectedClient ? (
-            <div style={{ padding: 16, border: "1px dashed #bbb", borderRadius: 8 }}>
-              Select a client to view folders.
-            </div>
+            <div style={{ padding: 16, border: "1px dashed #bbb", borderRadius: 8 }}>Select a client to view folders.</div>
           ) : (
             <ServiceFileBrowser client={selectedClient} basePath={activePath} />
           )}
