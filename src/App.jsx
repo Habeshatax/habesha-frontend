@@ -9,14 +9,20 @@ import ProtectedRoute from "./components/ProtectedRoute.jsx";
 export default function App() {
   return (
     <Routes>
-      <Route path="/" element={<Login />} />
+      {/* ✅ Public */}
+      <Route path="/login" element={<Login />} />
 
+      {/* ✅ Protected */}
       <Route element={<ProtectedRoute />}>
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/clients/:client" element={<ClientFiles />} />
       </Route>
 
-      <Route path="*" element={<Navigate to="/" replace />} />
+      {/* ✅ Root */}
+      <Route path="/" element={<Navigate to="/dashboard" replace />} />
+
+      {/* ✅ Catch-all (prevents white page) */}
+      <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
   );
 }
