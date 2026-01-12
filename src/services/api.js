@@ -1,7 +1,11 @@
 // src/services/api.js
 
+// src/services/api.js
+
 const API_URL =
-  (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "") || "http://localhost:8787";
+  (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "") ||
+  "https://habeshaweb.onrender.com"; // ✅ fallback for production
+
 
 // --------------------------
 // Basic fetch wrapper
