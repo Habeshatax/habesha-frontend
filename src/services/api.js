@@ -1,15 +1,14 @@
 // src/services/api.js
 
-// src/services/api.js
-
 const API_URL =
   (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "") ||
-  "https://habeshaweb.onrender.com"; // ✅ fallback for production
+  "https://habeshaweb.onrender.com"; // fallback for production
 
+function clearToken() {
+  localStorage.removeItem("token");
+  sessionStorage.removeItem("token");
+}
 
-// --------------------------
-// Basic fetch wrapper
-// --------------------------
 async function apiFetch(path, options = {}) {
   const token = localStorage.getItem("token") || sessionStorage.getItem("token");
 
@@ -17,22 +16,40 @@ async function apiFetch(path, options = {}) {
     ...(options.headers || {}),
   };
 
-  // If body is a string, assume JSON unless caller set a content-type
   if (options.body && typeof options.body === "string") {
     headers["Content-Type"] = headers["Content-Type"] || "application/json";
   }
 
-  // Auth header
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${API_URL}${path}`, {
-    ...options,
-    headers,
-  });
+  let res;
+  try {
+    res = await fetch(`${API_URL}${path}`, {
+      ...options,
+      headers,
+    });
+  } catch (e) {
+    // network/CORS/URL issue
+    throw new Error("Failed to fetch");
+  }
 
-  // Blob response support (downloads)
+  // ✅ If token expired / missing
+  if (res.status === 401) {
+    clearToken();
+
+    // Optional hard redirect so the app stops making more calls
+    // (works even if some component is still mounted)
+    if (typeof window !== "undefined") {
+      const isOnLogin = window.location.pathname.startsWith("/login");
+      if (!isOnLogin) window.location.href = "/login";
+    }
+
+    throw new Error("Unauthorized");
+  }
+
+  // Blob support
   if (options.expectBlob) {
     if (!res.ok) {
       const txt = await res.text().catch(() => "");
@@ -58,10 +75,7 @@ async function apiFetch(path, options = {}) {
   return data;
 }
 
-/* --------------------------
-   AUTH
--------------------------- */
-
+/* AUTH */
 export async function loginRequest(email, password) {
   return apiFetch("/login", {
     method: "POST",
@@ -73,17 +87,11 @@ export async function getMe() {
   return apiFetch("/api/me", { method: "GET" });
 }
 
-/* --------------------------
-   CLIENTS
--------------------------- */
-
-// ✅ Fix for Render build: Dashboard imports listClients
+/* CLIENTS */
 export async function listClients() {
   return apiFetch("/api/clients", { method: "GET" });
 }
 
-// Create client folder + structure
-// payload: { name, businessType, services: [] }
 export async function createClient(payload) {
   return apiFetch("/api/clients", {
     method: "POST",
@@ -91,11 +99,7 @@ export async function createClient(payload) {
   });
 }
 
-/* --------------------------
-   FILE BROWSER
--------------------------- */
-
-// List files/folders under client + path
+/* FILE BROWSER */
 export async function listClientItems(client, path = "") {
   const qs = path ? `?path=${encodeURIComponent(path)}` : "";
   return apiFetch(`/api/clients/${encodeURIComponent(client)}/files${qs}`, {
@@ -103,8 +107,6 @@ export async function listClientItems(client, path = "") {
   });
 }
 
-// Upload as base64
-// body: { fileName, base64, contentType? }
 export async function uploadBase64(client, path = "", fileName, base64, contentType = "") {
   const qs = path ? `?path=${encodeURIComponent(path)}` : "";
   return apiFetch(`/api/clients/${encodeURIComponent(client)}/uploadBase64${qs}`, {
@@ -113,8 +115,6 @@ export async function uploadBase64(client, path = "", fileName, base64, contentT
   });
 }
 
-// Create a folder
-// ✅ backend expects body: { name }
 export async function createFolder(client, path = "", name) {
   const qs = path ? `?path=${encodeURIComponent(path)}` : "";
   return apiFetch(`/api/clients/${encodeURIComponent(client)}/mkdir${qs}`, {
@@ -123,9 +123,6 @@ export async function createFolder(client, path = "", name) {
   });
 }
 
-// Create a text file
-// ✅ backend route: POST /api/clients/:client/writeText
-// ✅ body: { fileName, text }
 export async function createTextFile(client, path = "", fileName, text) {
   const qs = path ? `?path=${encodeURIComponent(path)}` : "";
   return apiFetch(`/api/clients/${encodeURIComponent(client)}/writeText${qs}`, {
@@ -134,51 +131,34 @@ export async function createTextFile(client, path = "", fileName, text) {
   });
 }
 
-// Delete a file
-// ✅ backend route: DELETE /api/clients/:client/file?file=...&path=...
 export async function deleteFile(client, path = "", fileName) {
-  const qs = `?file=${encodeURIComponent(fileName)}${
-    path ? `&path=${encodeURIComponent(path)}` : ""
-  }`;
-
+  const qs = `?file=${encodeURIComponent(fileName)}${path ? `&path=${encodeURIComponent(path)}` : ""}`;
   return apiFetch(`/api/clients/${encodeURIComponent(client)}/file${qs}`, {
     method: "DELETE",
   });
 }
 
-// Download a file (returns Blob)
-// ✅ backend route: GET /api/clients/:client/download?file=...&path=...
 export async function downloadFile(client, path = "", fileName) {
-  const qs = `?file=${encodeURIComponent(fileName)}${
-    path ? `&path=${encodeURIComponent(path)}` : ""
-  }`;
-
+  const qs = `?file=${encodeURIComponent(fileName)}${path ? `&path=${encodeURIComponent(path)}` : ""}`;
   return apiFetch(`/api/clients/${encodeURIComponent(client)}/download${qs}`, {
     method: "GET",
     expectBlob: true,
   });
 }
 
-/* --------------------------
-   Backwards-compatible aliases (old names used in some pages)
--------------------------- */
-
-// listClientFiles -> listClientItems
+/* ALIASES */
 export async function listClientFiles(client, path = "") {
   return listClientItems(client, path);
 }
 
-// uploadClientFileBase64 -> uploadBase64
 export async function uploadClientFileBase64(client, path = "", fileName, base64, contentType = "") {
   return uploadBase64(client, path, fileName, base64, contentType);
 }
 
-// deleteClientFile -> deleteFile
 export async function deleteClientFile(client, path = "", fileName) {
   return deleteFile(client, path, fileName);
 }
 
-// getDownloadUrl: convert blob to blob URL
 export async function getDownloadUrl(client, path = "", fileName) {
   const blob = await downloadFile(client, path, fileName);
   return URL.createObjectURL(blob);
