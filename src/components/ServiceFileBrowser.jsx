@@ -1,4 +1,4 @@
-// src/components/ServiceFileBrowser.jsx
+// src/components/ServiceFileBrowser.jsx (FULL FILE)
 
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -28,12 +28,24 @@ function joinPath(a, b) {
 function isInside(base, candidate) {
   const b = normalize(base);
   const c = normalize(candidate);
-  if (!b) return true; // if basePath empty -> allow anything (client root browsing)
+  if (!b) return true;
   return c === b || c.startsWith(b + "/");
 }
 
-export default function ServiceFileBrowser({ client, basePath }) {
+export default function ServiceFileBrowser({ client, basePath, permissions }) {
   const base = useMemo(() => normalize(basePath), [basePath]);
+
+  // ✅ default permissions (full access)
+  const perms = useMemo(
+    () =>
+      permissions || {
+        canUpload: true,
+        canDelete: true,
+        canMkdir: true,
+        canWriteText: true,
+      },
+    [permissions]
+  );
 
   const [path, setPath] = useState(base);
   const [items, setItems] = useState([]);
@@ -42,12 +54,10 @@ export default function ServiceFileBrowser({ client, basePath }) {
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
 
-  // Create helpers
   const [newFolderName, setNewFolderName] = useState("");
   const [newNoteName, setNewNoteName] = useState("");
   const [newNoteText, setNewNoteText] = useState("");
 
-  // Reset path whenever client or base tab changes
   useEffect(() => {
     setPath(base);
     setItems([]);
@@ -72,7 +82,6 @@ export default function ServiceFileBrowser({ client, basePath }) {
       const data = await listClientItems(client, forPath);
       const arr = data.items || [];
 
-      // safety sort (backend already sorts, but this avoids weirdness)
       arr.sort((a, b) => {
         if (a.type !== b.type) return a.type === "dir" ? -1 : 1;
         return String(a.name).localeCompare(String(b.name));
@@ -94,7 +103,6 @@ export default function ServiceFileBrowser({ client, basePath }) {
 
   function safeSetPath(next) {
     const n = normalize(next);
-    // keep user inside the selected tab folder
     if (!isInside(base, n)) {
       setErr("Blocked: you can only browse inside this tab folder.");
       return;
@@ -110,7 +118,6 @@ export default function ServiceFileBrowser({ client, basePath }) {
   function goUp() {
     if (!crumbs.length) return;
     const next = crumbs.slice(0, -1).join("/");
-    // do not go above base tab folder
     if (!isInside(base, next)) return;
     safeSetPath(next);
   }
@@ -120,6 +127,12 @@ export default function ServiceFileBrowser({ client, basePath }) {
   }
 
   async function handleUpload(e) {
+    if (!perms.canUpload) {
+      setErr("Uploads are disabled in this tab.");
+      e.target.value = "";
+      return;
+    }
+
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
@@ -139,6 +152,11 @@ export default function ServiceFileBrowser({ client, basePath }) {
   }
 
   async function handleDelete(name) {
+    if (!perms.canDelete) {
+      setErr("Delete is disabled in this tab.");
+      return;
+    }
+
     if (!confirm(`Delete "${name}"?`)) return;
     setErr("");
     setMsg("Deleting...");
@@ -175,6 +193,11 @@ export default function ServiceFileBrowser({ client, basePath }) {
   }
 
   async function handleCreateFolder() {
+    if (!perms.canMkdir) {
+      setErr("Creating folders is disabled in this tab.");
+      return;
+    }
+
     const folder = newFolderName.trim();
     if (!folder) return;
 
@@ -192,13 +215,18 @@ export default function ServiceFileBrowser({ client, basePath }) {
   }
 
   async function handleCreateNote() {
+    if (!perms.canWriteText) {
+      setErr("Notes are disabled in this tab.");
+      return;
+    }
+
     const fileName = newNoteName.trim() || "note.txt";
-    const content = newNoteText || "";
+    const text = newNoteText || "";
 
     setErr("");
     setMsg("Saving note...");
     try {
-      await createTextFile(client, path, fileName, content);
+      await createTextFile(client, path, fileName, text);
       setNewNoteName("");
       setNewNoteText("");
       setMsg("Note saved ✅");
@@ -216,8 +244,7 @@ export default function ServiceFileBrowser({ client, basePath }) {
       {/* Top controls */}
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
         <div>
-          <strong>Path:</strong>{" "}
-          <span style={{ fontFamily: "monospace" }}>{displayPath}</span>
+          <strong>Path:</strong> <span style={{ fontFamily: "monospace" }}>{displayPath}</span>
         </div>
 
         <button onClick={() => refresh(path)} disabled={loading || !client}>
@@ -232,42 +259,47 @@ export default function ServiceFileBrowser({ client, basePath }) {
           Go to tab root
         </button>
 
+        {/* ✅ Upload locked by permissions */}
         <label
           style={{
             border: "1px solid #ccc",
             padding: "6px 10px",
             borderRadius: 6,
-            cursor: "pointer",
+            cursor: perms.canUpload ? "pointer" : "not-allowed",
+            opacity: perms.canUpload ? 1 : 0.5,
           }}
+          title={perms.canUpload ? "Upload file" : "Uploads disabled in this tab"}
         >
           Upload file
-          <input type="file" onChange={handleUpload} style={{ display: "none" }} />
+          <input type="file" onChange={handleUpload} style={{ display: "none" }} disabled={!perms.canUpload} />
         </label>
+
+        {/* Small badge so you can SEE the mode */}
+        <span
+          style={{
+            fontSize: 12,
+            padding: "4px 8px",
+            borderRadius: 999,
+            border: "1px solid #ddd",
+            color: "#555",
+            background: perms.canUpload || perms.canDelete || perms.canMkdir || perms.canWriteText ? "#fff" : "#f7f7f7",
+          }}
+          title="Tab permissions"
+        >
+          {perms.canUpload || perms.canDelete || perms.canMkdir || perms.canWriteText ? "Editable" : "Read-only"}
+        </span>
       </div>
 
       {/* Breadcrumbs */}
       <div style={{ marginTop: 10, fontSize: 14 }}>
-        <span
-          style={{
-            cursor: base ? "default" : "pointer",
-            textDecoration: base ? "none" : "underline",
-            color: base ? "#999" : "inherit",
-          }}
-          onClick={() => {
-            if (!base) safeSetPath("");
-          }}
-          title={base ? "This tab is locked to its base folder" : "Go to client root"}
-        >
+        <span style={{ cursor: "default", color: "#999" }} title="This tab is locked to its base folder">
           root
         </span>
 
         {crumbs.map((c, i) => (
           <span key={i}>
             {" / "}
-            <span
-              style={{ cursor: "pointer", textDecoration: "underline" }}
-              onClick={() => goToCrumb(i)}
-            >
+            <span style={{ cursor: "pointer", textDecoration: "underline" }} onClick={() => goToCrumb(i)}>
               {c}
             </span>
           </span>
@@ -279,7 +311,7 @@ export default function ServiceFileBrowser({ client, basePath }) {
 
       {/* Create tools */}
       <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        <div style={{ border: "1px solid #eee", padding: 12, borderRadius: 8 }}>
+        <div style={{ border: "1px solid #eee", padding: 12, borderRadius: 8, opacity: perms.canMkdir ? 1 : 0.6 }}>
           <div style={{ fontWeight: 600, marginBottom: 8 }}>New folder</div>
           <div style={{ display: "flex", gap: 8 }}>
             <input
@@ -287,28 +319,31 @@ export default function ServiceFileBrowser({ client, basePath }) {
               placeholder="e.g. 08 Queries"
               value={newFolderName}
               onChange={(e) => setNewFolderName(e.target.value)}
+              disabled={!perms.canMkdir}
             />
-            <button onClick={handleCreateFolder} disabled={loading || !client}>
+            <button onClick={handleCreateFolder} disabled={loading || !client || !perms.canMkdir}>
               Create
             </button>
           </div>
         </div>
 
-        <div style={{ border: "1px solid #eee", padding: 12, borderRadius: 8 }}>
+        <div style={{ border: "1px solid #eee", padding: 12, borderRadius: 8, opacity: perms.canWriteText ? 1 : 0.6 }}>
           <div style={{ fontWeight: 600, marginBottom: 8 }}>New note</div>
           <input
             style={{ width: "100%", padding: 8, marginBottom: 8 }}
             placeholder="File name (e.g. client-note.txt)"
             value={newNoteName}
             onChange={(e) => setNewNoteName(e.target.value)}
+            disabled={!perms.canWriteText}
           />
           <textarea
             style={{ width: "100%", padding: 8, minHeight: 70, marginBottom: 8 }}
             placeholder="Type your note..."
             value={newNoteText}
             onChange={(e) => setNewNoteText(e.target.value)}
+            disabled={!perms.canWriteText}
           />
-          <button onClick={handleCreateNote} disabled={loading || !client}>
+          <button onClick={handleCreateNote} disabled={loading || !client || !perms.canWriteText}>
             Save note
           </button>
         </div>
@@ -356,7 +391,9 @@ export default function ServiceFileBrowser({ client, basePath }) {
                     {it.type === "file" ? (
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                         <button onClick={() => handleDownload(it.name)}>Download</button>
-                        <button onClick={() => handleDelete(it.name)}>Delete</button>
+                        <button onClick={() => handleDelete(it.name)} disabled={!perms.canDelete}>
+                          Delete
+                        </button>
                       </div>
                     ) : (
                       <span style={{ color: "#999" }}>—</span>
@@ -372,7 +409,6 @@ export default function ServiceFileBrowser({ client, basePath }) {
   );
 }
 
-// helpers
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();

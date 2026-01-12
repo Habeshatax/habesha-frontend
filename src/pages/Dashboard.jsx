@@ -42,19 +42,30 @@ export default function Dashboard() {
     []
   );
 
+  // ✅ Tab permissions (lock folders per service)
+  // You can change these anytime.
+  const tabPermissions = useMemo(
+    () => ({
+      eng: { canUpload: false, canDelete: false, canMkdir: false, canWriteText: false }, // read-only
+      id: { canUpload: true, canDelete: false, canMkdir: true, canWriteText: true }, // safer (no delete)
+      comp: { canUpload: true, canDelete: true, canMkdir: true, canWriteText: true },
+      work: { canUpload: true, canDelete: true, canMkdir: true, canWriteText: true },
+      personal: { canUpload: true, canDelete: true, canMkdir: true, canWriteText: true },
+      downloads: { canUpload: true, canDelete: true, canMkdir: true, canWriteText: true },
+    }),
+    []
+  );
+
   const [activeTab, setActiveTab] = useState(tabs[0].key);
 
-  const activePath = useMemo(() => {
-    return tabs.find((t) => t.key === activeTab)?.path || "";
-  }, [activeTab, tabs]);
+  const activePath = useMemo(() => tabs.find((t) => t.key === activeTab)?.path || "", [activeTab, tabs]);
+  const activePerms = useMemo(() => tabPermissions[activeTab] || null, [activeTab, tabPermissions]);
 
-  // ✅ If user is not logged in, bounce to /login (hard redirect avoids blank page)
+  // ✅ If user is not logged in, bounce to /login
   useEffect(() => {
     const token = localStorage.getItem("token") || sessionStorage.getItem("token");
-    if (!token) {
-      window.location.replace("/login");
-    }
-  }, []);
+    if (!token) navigate("/login", { replace: true });
+  }, [navigate]);
 
   // Keep services aligned with businessType (helpful defaults)
   useEffect(() => {
@@ -74,19 +85,11 @@ export default function Dashboard() {
         next.self_assessment = false;
         next.landlords = false;
       }
-
       return next;
     });
   }, [businessType]);
 
   async function refreshClients(keepSelection = true) {
-    const token = localStorage.getItem("token") || sessionStorage.getItem("token");
-    if (!token) {
-      // if token missing, redirect to login
-      window.location.replace("/login");
-      return;
-    }
-
     setLoadingClients(true);
     setErr("");
     setMsg("");
@@ -102,17 +105,7 @@ export default function Dashboard() {
         setSelectedClient(list[0] || "");
       }
     } catch (e) {
-      const message = String(e?.message || e);
-
-      // If backend says unauthorized, force login
-      if (message.toLowerCase().includes("unauthorized")) {
-        localStorage.removeItem("token");
-        sessionStorage.removeItem("token");
-        window.location.replace("/login");
-        return;
-      }
-
-      setErr(message);
+      setErr(String(e.message || e));
     } finally {
       setLoadingClients(false);
     }
@@ -140,12 +133,6 @@ export default function Dashboard() {
     const name = newClient.trim();
     if (!name) return;
 
-    const token = localStorage.getItem("token") || sessionStorage.getItem("token");
-    if (!token) {
-      window.location.replace("/login");
-      return;
-    }
-
     setErr("");
     setMsg("");
     setCreating(true);
@@ -166,29 +153,15 @@ export default function Dashboard() {
 
       setActiveTab("comp");
     } catch (e2) {
-      const message = String(e2?.message || e2);
-
-      if (message.toLowerCase().includes("unauthorized")) {
-        localStorage.removeItem("token");
-        sessionStorage.removeItem("token");
-        window.location.replace("/login");
-        return;
-      }
-
-      setErr(message);
+      setErr(String(e2.message || e2));
     } finally {
       setCreating(false);
     }
   }
 
-  // ✅ Logout: hard redirect fixes the occasional blank screen
   function logout() {
     localStorage.removeItem("token");
     sessionStorage.removeItem("token");
-    setClients([]);
-    setSelectedClient("");
-    setErr("");
-    setMsg("");
     window.location.replace("/login");
   }
 
@@ -199,9 +172,7 @@ export default function Dashboard() {
         <button onClick={logout}>Logout</button>
       </div>
 
-      <p style={{ marginTop: 6, color: "#555" }}>
-        Option B: create clients + browse folders by service (tabs).
-      </p>
+      <p style={{ marginTop: 6, color: "#555" }}>Create clients + browse folders by service (tabs).</p>
 
       {/* Create + Select client */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 14 }}>
@@ -225,11 +196,7 @@ export default function Dashboard() {
             <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <div>
                 <div style={{ fontSize: 13, color: "#555", marginBottom: 6 }}>Business type</div>
-                <select
-                  style={{ width: "100%", padding: 8 }}
-                  value={businessType}
-                  onChange={(e) => setBusinessType(e.target.value)}
-                >
+                <select style={{ width: "100%", padding: 8 }} value={businessType} onChange={(e) => setBusinessType(e.target.value)}>
                   <option value="self_assessment">Self Assessment (sole trader)</option>
                   <option value="landlords">Landlords</option>
                   <option value="limited_company">Limited Company</option>
@@ -240,68 +207,37 @@ export default function Dashboard() {
                 <div style={{ fontSize: 13, color: "#555", marginBottom: 6 }}>Services (folders)</div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 6 }}>
                   <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <input
-                      type="checkbox"
-                      checked={services.self_assessment}
-                      onChange={() => toggleService("self_assessment")}
-                      disabled={businessType === "self_assessment"}
-                    />
+                    <input type="checkbox" checked={services.self_assessment} onChange={() => toggleService("self_assessment")} disabled={businessType === "self_assessment"} />
                     Self Assessment
                   </label>
 
                   <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <input
-                      type="checkbox"
-                      checked={services.landlords}
-                      onChange={() => toggleService("landlords")}
-                      disabled={businessType === "landlords"}
-                    />
+                    <input type="checkbox" checked={services.landlords} onChange={() => toggleService("landlords")} disabled={businessType === "landlords"} />
                     Landlords
                   </label>
 
                   <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <input
-                      type="checkbox"
-                      checked={services.limited_company}
-                      onChange={() => toggleService("limited_company")}
-                      disabled={businessType === "limited_company"}
-                    />
+                    <input type="checkbox" checked={services.limited_company} onChange={() => toggleService("limited_company")} disabled={businessType === "limited_company"} />
                     Limited Company
                   </label>
 
                   <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <input
-                      type="checkbox"
-                      checked={services.bookkeeping}
-                      onChange={() => toggleService("bookkeeping")}
-                    />
+                    <input type="checkbox" checked={services.bookkeeping} onChange={() => toggleService("bookkeeping")} />
                     Bookkeeping
                   </label>
 
                   <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <input
-                      type="checkbox"
-                      checked={services.vat_mtd}
-                      onChange={() => toggleService("vat_mtd")}
-                    />
+                    <input type="checkbox" checked={services.vat_mtd} onChange={() => toggleService("vat_mtd")} />
                     MTD VAT
                   </label>
 
                   <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <input
-                      type="checkbox"
-                      checked={services.payroll}
-                      onChange={() => toggleService("payroll")}
-                    />
+                    <input type="checkbox" checked={services.payroll} onChange={() => toggleService("payroll")} />
                     Payroll
                   </label>
 
                   <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <input
-                      type="checkbox"
-                      checked={services.home_office}
-                      onChange={() => toggleService("home_office")}
-                    />
+                    <input type="checkbox" checked={services.home_office} onChange={() => toggleService("home_office")} />
                     Home Office / Other
                   </label>
                 </div>
@@ -318,11 +254,7 @@ export default function Dashboard() {
             <div>Loading clients…</div>
           ) : (
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <select
-                style={{ flex: 1, padding: 8 }}
-                value={selectedClient}
-                onChange={(e) => setSelectedClient(e.target.value)}
-              >
+              <select style={{ flex: 1, padding: 8 }} value={selectedClient} onChange={(e) => setSelectedClient(e.target.value)}>
                 <option value="">-- select --</option>
                 {clients.map((c) => (
                   <option key={c} value={c}>
@@ -370,11 +302,9 @@ export default function Dashboard() {
 
         <div style={{ marginTop: 12 }}>
           {!selectedClient ? (
-            <div style={{ padding: 16, border: "1px dashed #bbb", borderRadius: 8 }}>
-              Select a client to view folders.
-            </div>
+            <div style={{ padding: 16, border: "1px dashed #bbb", borderRadius: 8 }}>Select a client to view folders.</div>
           ) : (
-            <ServiceFileBrowser client={selectedClient} basePath={activePath} />
+            <ServiceFileBrowser client={selectedClient} basePath={activePath} permissions={activePerms} />
           )}
         </div>
       </div>
