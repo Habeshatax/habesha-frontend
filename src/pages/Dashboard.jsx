@@ -63,11 +63,7 @@ export default function Dashboard() {
   const activePerms = useMemo(() => tabPermissions[activeTab] || null, [activeTab, tabPermissions]);
 
   // ✅ If user is not logged in, bounce to /login
-  useEffect(() => {
-    const token = localStorage.getItem("token") || sessionStorage.getItem("token");
-    if (!token) navigate("/login", { replace: true });
-  }, [navigate]);
-
+ 
   // Keep services aligned with businessType (helpful defaults)
   useEffect(() => {
     setServices((prev) => {

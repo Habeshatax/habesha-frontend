@@ -7,5 +7,9 @@ export default function ProtectedRoute() {
 
   if (loading) return <div style={{ padding: 24 }}>Loading…</div>;
 
-  return isLoggedIn ? <Outlet /> : <Navigate to="/" replace />;
+  if (!isLoggedIn) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return <Outlet />;
 }
