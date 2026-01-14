@@ -7,9 +7,8 @@ import {
   downloadFile,
   createFolder,
   createTextFile,
-  trashFile,
+  trashItem, // ✅ correct import (matches api.js)
 } from "../services/api";
-
 
 function normalize(p) {
   return String(p || "")
@@ -152,21 +151,28 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
     }
   }
 
+  // ✅ Trash (soft delete) -> backend POST /api/clients/:client/trash?path=...
+  // ✅ body: { name }
   async function handleTrash(name) {
-  if (!confirm(`Move "${name}" to Trash?`)) return;
+    if (!perms.canDelete) {
+      setErr("Deleting is disabled in this tab.");
+      return;
+    }
 
-  setErr("");
-  setMsg("Moving to Trash...");
+    if (!confirm(`Move "${name}" to Trash?`)) return;
 
-  try {
-    await trashFile(client, path, name);
-    setMsg("Moved to Trash ✅");
-    await refresh(path);
-  } catch (ex) {
-    setMsg("");
-    setErr(String(ex.message || ex));
+    setErr("");
+    setMsg("Moving to Trash...");
+
+    try {
+      await trashItem(client, path, name);
+      setMsg("Moved to Trash ✅");
+      await refresh(path);
+    } catch (ex) {
+      setMsg("");
+      setErr(String(ex.message || ex));
+    }
   }
-}
 
   async function handleDownload(name) {
     setErr("");
@@ -257,7 +263,7 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
           Go to tab root
         </button>
 
-        {/* ✅ Upload locked by permissions */}
+        {/* Upload */}
         <label
           style={{
             border: "1px solid #ccc",
@@ -272,7 +278,7 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
           <input type="file" onChange={handleUpload} style={{ display: "none" }} disabled={!perms.canUpload} />
         </label>
 
-        {/* Small badge so you can SEE the mode */}
+        {/* Mode badge */}
         <span
           style={{
             fontSize: 12,
@@ -384,16 +390,24 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
                       <span>📄 {it.name}</span>
                     )}
                   </td>
+
                   <td style={{ borderBottom: "1px solid #f2f2f2", padding: 8 }}>{it.type}</td>
+
                   <td style={{ borderBottom: "1px solid #f2f2f2", padding: 8 }}>
                     {it.type === "file" ? (
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                         <button onClick={() => handleDownload(it.name)}>Download</button>
-                        <button onClick={() => handleTrash(it.name)}>Trash</button>
-
+                        <button onClick={() => handleTrash(it.name)} disabled={!perms.canDelete}>
+                          Trash
+                        </button>
                       </div>
                     ) : (
-                      <span style={{ color: "#999" }}>—</span>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <button onClick={() => safeSetPath(joinPath(path, it.name))}>Open</button>
+                        <button onClick={() => handleTrash(it.name)} disabled={!perms.canDelete}>
+                          Trash
+                        </button>
+                      </div>
                     )}
                   </td>
                 </tr>

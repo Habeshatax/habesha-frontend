@@ -1,14 +1,18 @@
-// src/services/api.js
+// src/services/api.js (FULL FILE)
 
-const API_URL =
-  (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "") ||
-  "https://habeshaweb.onrender.com"; // fallback for production
+const RAW = (import.meta.env.VITE_API_URL || "").trim();
 
-function clearToken() {
-  localStorage.removeItem("token");
-  sessionStorage.removeItem("token");
-}
+// In production, never default to localhost.
+// In dev, localhost is fine.
+const API_URL = (RAW ||
+  (import.meta.env.DEV ? "http://localhost:8787" : "https://habeshaweb.onrender.com")
+).replace(/\/+$/, "");
 
+console.log("API_URL =", API_URL);
+
+// --------------------------
+// Basic fetch wrapper
+// --------------------------
 async function apiFetch(path, options = {}) {
   const token = localStorage.getItem("token") || sessionStorage.getItem("token");
 
@@ -16,6 +20,7 @@ async function apiFetch(path, options = {}) {
     ...(options.headers || {}),
   };
 
+  // If body is a JSON string, set content-type automatically
   if (options.body && typeof options.body === "string") {
     headers["Content-Type"] = headers["Content-Type"] || "application/json";
   }
@@ -24,36 +29,16 @@ async function apiFetch(path, options = {}) {
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  let res;
-  try {
-    res = await fetch(`${API_URL}${path}`, {
-      ...options,
-      headers,
-    });
-  } catch (e) {
-    // network/CORS/URL issue
-    throw new Error("Failed to fetch");
-  }
+  const res = await fetch(`${API_URL}${path}`, {
+    ...options,
+    headers,
+  });
 
-  // ✅ If token expired / missing
-  if (res.status === 401) {
-    clearToken();
-
-    // Optional hard redirect so the app stops making more calls
-    // (works even if some component is still mounted)
-    if (typeof window !== "undefined") {
-      const isOnLogin = window.location.pathname.startsWith("/login");
-      if (!isOnLogin) window.location.href = "/login";
-    }
-
-    throw new Error("Unauthorized");
-  }
-
-  // Blob support
+  // ✅ Blob support (for downloads)
   if (options.expectBlob) {
     if (!res.ok) {
-      const txt = await res.text().catch(() => "");
-      throw new Error(txt || `Request failed (${res.status})`);
+      const text = await res.text().catch(() => "");
+      throw new Error(text || `Request failed (${res.status})`);
     }
     return res.blob();
   }
@@ -75,7 +60,10 @@ async function apiFetch(path, options = {}) {
   return data;
 }
 
-/* AUTH */
+/* --------------------------
+   AUTH
+-------------------------- */
+
 export async function loginRequest(email, password) {
   return apiFetch("/login", {
     method: "POST",
@@ -87,7 +75,10 @@ export async function getMe() {
   return apiFetch("/api/me", { method: "GET" });
 }
 
-/* CLIENTS */
+/* --------------------------
+   CLIENTS
+-------------------------- */
+
 export async function listClients() {
   return apiFetch("/api/clients", { method: "GET" });
 }
@@ -99,7 +90,10 @@ export async function createClient(payload) {
   });
 }
 
-/* FILE BROWSER */
+/* --------------------------
+   FILE BROWSER
+-------------------------- */
+
 export async function listClientItems(client, path = "") {
   const qs = path ? `?path=${encodeURIComponent(path)}` : "";
   return apiFetch(`/api/clients/${encodeURIComponent(client)}/files${qs}`, {
@@ -137,17 +131,8 @@ export async function deleteFile(client, path = "", fileName) {
     method: "DELETE",
   });
 }
-// ✅ Soft delete (move to Trash)
-// ✅ backend route: POST /api/clients/:client/trash?file=...&path=...
-export async function trashFile(client, path = "", fileName) {
-  const qs = `?file=${encodeURIComponent(fileName)}${
-    path ? `&path=${encodeURIComponent(path)}` : ""
-  }`;
 
-  return apiFetch(`/api/clients/${encodeURIComponent(client)}/trash${qs}`, {
-    method: "POST",
-  });
-}
+// ✅ Download as BLOB (works with your ServiceFileBrowser download code)
 export async function downloadFile(client, path = "", fileName) {
   const qs = `?file=${encodeURIComponent(fileName)}${path ? `&path=${encodeURIComponent(path)}` : ""}`;
   return apiFetch(`/api/clients/${encodeURIComponent(client)}/download${qs}`, {
@@ -156,20 +141,11 @@ export async function downloadFile(client, path = "", fileName) {
   });
 }
 
-/* ALIASES */
-export async function listClientFiles(client, path = "") {
-  return listClientItems(client, path);
-}
-
-export async function uploadClientFileBase64(client, path = "", fileName, base64, contentType = "") {
-  return uploadBase64(client, path, fileName, base64, contentType);
-}
-
-export async function deleteClientFile(client, path = "", fileName) {
-  return deleteFile(client, path, fileName);
-}
-
-export async function getDownloadUrl(client, path = "", fileName) {
-  const blob = await downloadFile(client, path, fileName);
-  return URL.createObjectURL(blob);
+// ✅ Trash (soft delete)
+// POST /api/clients/:client/trash?file=...&path=...
+export async function trashItem(client, path = "", fileName) {
+  const qs = `?file=${encodeURIComponent(fileName)}${path ? `&path=${encodeURIComponent(path)}` : ""}`;
+  return apiFetch(`/api/clients/${encodeURIComponent(client)}/trash${qs}`, {
+    method: "POST",
+  });
 }
