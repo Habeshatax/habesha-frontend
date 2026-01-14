@@ -1,7 +1,7 @@
 // src/context/AuthContext.jsx (FULL FILE)
 
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { loginRequest, getMe } from "../services/api";
+import { loginRequest, clientLoginRequest, getMe } from "../services/api";
 
 // --------------------------------------------
 // Helpers for token storage
@@ -33,11 +33,11 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // ✅ Logged in if token exists. (User may load after /api/me)
   const isLoggedIn = !!token;
 
-  // Login (calls POST /login)
-  // backend returns: { ok:true, token, user }
+  // --------------------------
+  // Admin Login (POST /login)
+  // --------------------------
   const login = async ({ email, password, remember = true }) => {
     const cleanEmail = String(email || "").trim().toLowerCase();
     const cleanPassword = String(password || "").trim();
@@ -53,8 +53,30 @@ export function AuthProvider({ children }) {
     }
 
     saveToken(data.token, remember);
+    setToken(data.token);
+    setUser(data.user || null);
 
-    // ✅ update state immediately
+    return data;
+  };
+
+  // --------------------------
+  // Client Login (POST /client-login)
+  // --------------------------
+  const loginClient = async ({ email, password, remember = true }) => {
+    const cleanEmail = String(email || "").trim().toLowerCase();
+    const cleanPassword = String(password || "").trim();
+
+    if (!cleanEmail || !cleanPassword) {
+      throw new Error("Please enter email and password");
+    }
+
+    const data = await clientLoginRequest(cleanEmail, cleanPassword);
+
+    if (!data?.token) {
+      throw new Error("Login failed: token not returned by server");
+    }
+
+    saveToken(data.token, remember);
     setToken(data.token);
     setUser(data.user || null);
 
@@ -88,7 +110,6 @@ export function AuthProvider({ children }) {
       }
 
       try {
-        // token exists locally; validate by calling /api/me
         const me = await getMe(); // expected: { ok:true, user }
 
         if (!cancelled) {
@@ -96,7 +117,6 @@ export function AuthProvider({ children }) {
           setUser(me?.user || null);
         }
       } catch {
-        // token invalid/expired OR backend said 401
         clearToken();
         if (!cancelled) {
           setToken("");
@@ -121,6 +141,7 @@ export function AuthProvider({ children }) {
       isLoggedIn,
       loading,
       login,
+      loginClient, // ✅ added
       logout,
     }),
     [token, user, isLoggedIn, loading]
