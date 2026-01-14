@@ -145,7 +145,9 @@ export async function downloadFile(client, path = "", fileName) {
 // POST /api/clients/:client/trash?file=...&path=...
 export async function trashItem(client, path = "", fileName) {
   const qs = `?file=${encodeURIComponent(fileName)}${path ? `&path=${encodeURIComponent(path)}` : ""}`;
+
   return apiFetch(`/api/clients/${encodeURIComponent(client)}/trash${qs}`, {
     method: "POST",
   });
 }
+
