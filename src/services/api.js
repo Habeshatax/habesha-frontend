@@ -142,8 +142,6 @@ export async function downloadFile(client, path = "", fileName) {
 }
 
 // ✅ Trash (soft delete)
-// POST /api/clients/:client/trash?file=...&path=...
-// ✅ Trash (soft delete)
 // POST /api/clients/:client/trash?path=...
 // body: { name }
 export async function trashItem(client, path = "", name) {
@@ -155,4 +153,19 @@ export async function trashItem(client, path = "", name) {
   });
 }
 
+/**
+ * ♻️ Restore from Trash (FILES + FOLDERS)
+ * POST /api/clients/:client/restore?path=...&name=...
+ *
+ * path = original folder relative path (same one you used when trashing)
+ * name = the item name as it exists in Trash (could include __timestamp if it collided)
+ */
+export async function restoreFromTrash(client, path = "", name) {
+  const qs = `?name=${encodeURIComponent(String(name || "").trim())}${
+    path ? `&path=${encodeURIComponent(path)}` : ""
+  }`;
 
+  return apiFetch(`/api/clients/${encodeURIComponent(client)}/restore${qs}`, {
+    method: "POST",
+  });
+}

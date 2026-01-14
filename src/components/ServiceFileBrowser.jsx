@@ -7,7 +7,8 @@ import {
   downloadFile,
   createFolder,
   createTextFile,
-  trashItem, // ✅ correct import (matches api.js)
+  trashItem,
+  restoreFromTrash, // ✅ NEW
 } from "../services/api";
 
 function normalize(p) {
@@ -32,6 +33,8 @@ function isInside(base, candidate) {
   return c === b || c.startsWith(b + "/");
 }
 
+const TRASH_ROOT = "05 Downloads/_Trash";
+
 export default function ServiceFileBrowser({ client, basePath, permissions }) {
   const base = useMemo(() => normalize(basePath), [basePath]);
 
@@ -47,7 +50,15 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
     [permissions]
   );
 
+  // Normal browsing (locked to tab base)
   const [path, setPath] = useState(base);
+
+  // Global Trash browsing (NOT locked to tab base)
+  // This is the relative path INSIDE trash (which mirrors original paths)
+  const [trashRel, setTrashRel] = useState("");
+
+  const [trashMode, setTrashMode] = useState(false);
+
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -60,20 +71,34 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
 
   useEffect(() => {
     setPath(base);
+    setTrashRel("");
+    setTrashMode(false);
     setItems([]);
     setMsg("");
     setErr("");
   }, [client, base]);
 
+  // Breadcrumbs:
+  // - normal mode: based on `path` (tab-locked)
+  // - trash mode: based on `trashRel` (global)
   const crumbs = useMemo(() => {
-    const clean = normalize(path);
+    const clean = trashMode ? normalize(trashRel) : normalize(path);
     if (!clean) return [];
     return clean.split("/");
-  }, [path]);
+  }, [trashMode, trashRel, path]);
 
   const atTabRoot = useMemo(() => normalize(path) === normalize(base), [path, base]);
+  const atTrashRoot = useMemo(() => normalize(trashRel) === "", [trashRel]);
 
-  async function refresh(forPath = path) {
+  // Backend path to list:
+  // - normal: path
+  // - trash: TRASH_ROOT + trashRel
+  const effectivePath = useMemo(() => {
+    if (!trashMode) return path;
+    return joinPath(TRASH_ROOT, trashRel);
+  }, [trashMode, path, trashRel]);
+
+  async function refresh(forPath = effectivePath) {
     if (!client) return;
     setLoading(true);
     setErr("");
@@ -97,10 +122,11 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
   }
 
   useEffect(() => {
-    refresh(path);
+    refresh(effectivePath);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, path]);
+  }, [client, effectivePath]);
 
+  // Normal mode path changes must stay inside base.
   function safeSetPath(next) {
     const n = normalize(next);
     if (!isInside(base, n)) {
@@ -112,12 +138,22 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
 
   function goToCrumb(index) {
     const next = crumbs.slice(0, index + 1).join("/");
-    safeSetPath(next);
+    if (trashMode) {
+      setTrashRel(next);
+    } else {
+      safeSetPath(next);
+    }
   }
 
   function goUp() {
     if (!crumbs.length) return;
     const next = crumbs.slice(0, -1).join("/");
+    if (trashMode) {
+      setTrashRel(next);
+      return;
+    }
+
+    // normal mode
     if (!isInside(base, next)) return;
     safeSetPath(next);
   }
@@ -126,9 +162,19 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
     safeSetPath(base);
   }
 
+  function goTrashRoot() {
+    setTrashRel("");
+  }
+
   async function handleUpload(e) {
     if (!perms.canUpload) {
       setErr("Uploads are disabled in this tab.");
+      e.target.value = "";
+      return;
+    }
+
+    if (trashMode) {
+      setErr("Uploads are disabled while viewing Trash.");
       e.target.value = "";
       return;
     }
@@ -144,18 +190,22 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
       const base64 = await fileToBase64(file);
       await uploadBase64(client, path, file.name, base64, file.type || "");
       setMsg("Uploaded ✅");
-      await refresh(path);
+      await refresh(effectivePath);
     } catch (ex) {
       setMsg("");
       setErr(String(ex.message || ex));
     }
   }
 
-  // ✅ Trash (soft delete) -> backend POST /api/clients/:client/trash?path=...
-  // ✅ body: { name }
+  // ✅ Trash (soft delete)
   async function handleTrash(name) {
     if (!perms.canDelete) {
       setErr("Deleting is disabled in this tab.");
+      return;
+    }
+
+    if (trashMode) {
+      setErr("You are viewing Trash. Use Restore instead.");
       return;
     }
 
@@ -167,7 +217,26 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
     try {
       await trashItem(client, path, String(name).trim());
       setMsg("Moved to Trash ✅");
-      await refresh(path);
+      await refresh(effectivePath);
+    } catch (ex) {
+      setMsg("");
+      setErr(String(ex.message || ex));
+    }
+  }
+
+  // ♻️ Restore from Trash (global)
+  async function handleRestore(name) {
+    // trashRel represents original folder path (because trash mirrors structure)
+    // restore endpoint expects: path=<original folder> & name=<trashed name>
+    if (!confirm(`Restore "${name}" from Trash?`)) return;
+
+    setErr("");
+    setMsg("Restoring...");
+
+    try {
+      await restoreFromTrash(client, trashRel, String(name).trim());
+      setMsg("Restored ✅");
+      await refresh(effectivePath);
     } catch (ex) {
       setMsg("");
       setErr(String(ex.message || ex));
@@ -178,7 +247,8 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
     setErr("");
     setMsg("Downloading...");
     try {
-      const blob = await downloadFile(client, path, String(name).trim());
+      // In trash mode, we download from TRASH_ROOT + trashRel
+      const blob = await downloadFile(client, effectivePath, String(name).trim());
 
       const url = URL.createObjectURL(blob);
 
@@ -203,6 +273,11 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
       return;
     }
 
+    if (trashMode) {
+      setErr("Creating folders is disabled while viewing Trash.");
+      return;
+    }
+
     const folder = newFolderName.trim();
     if (!folder) return;
 
@@ -212,7 +287,7 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
       await createFolder(client, path, folder);
       setNewFolderName("");
       setMsg("Folder created ✅");
-      await refresh(path);
+      await refresh(effectivePath);
     } catch (ex) {
       setMsg("");
       setErr(String(ex.message || ex));
@@ -222,6 +297,11 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
   async function handleCreateNote() {
     if (!perms.canWriteText) {
       setErr("Notes are disabled in this tab.");
+      return;
+    }
+
+    if (trashMode) {
+      setErr("Notes are disabled while viewing Trash.");
       return;
     }
 
@@ -235,14 +315,16 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
       setNewNoteName("");
       setNewNoteText("");
       setMsg("Note saved ✅");
-      await refresh(path);
+      await refresh(effectivePath);
     } catch (ex) {
       setMsg("");
       setErr(String(ex.message || ex));
     }
   }
 
-  const displayPath = path || "(client root)";
+  const displayPath = trashMode
+    ? `TRASH / ${trashRel || "(root)"}`
+    : `FILES / ${path || "(tab root)"}`;
 
   return (
     <div style={{ border: "1px solid #ddd", padding: 16, borderRadius: 8 }}>
@@ -252,16 +334,42 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
           <strong>Path:</strong> <span style={{ fontFamily: "monospace" }}>{displayPath}</span>
         </div>
 
-        <button onClick={() => refresh(path)} disabled={loading || !client}>
+        <button onClick={() => refresh(effectivePath)} disabled={loading || !client}>
           Refresh
         </button>
 
-        <button onClick={goUp} disabled={loading || !crumbs.length || atTabRoot}>
+        <button
+          onClick={goUp}
+          disabled={loading || !crumbs.length || (!trashMode && atTabRoot) || (trashMode && atTrashRoot)}
+        >
           Up
         </button>
 
-        <button onClick={goTabRoot} disabled={loading || !client || atTabRoot}>
-          Go to tab root
+        {!trashMode ? (
+          <button onClick={goTabRoot} disabled={loading || !client || atTabRoot}>
+            Go to tab root
+          </button>
+        ) : (
+          <button onClick={goTrashRoot} disabled={loading || !client || atTrashRoot}>
+            Go to Trash root
+          </button>
+        )}
+
+        {/* Global Trash toggle */}
+        <button
+          onClick={() => {
+            setErr("");
+            setMsg("");
+            setTrashMode((v) => {
+              const next = !v;
+              if (next) setTrashRel(""); // always start at trash root
+              return next;
+            });
+          }}
+          disabled={loading || !client}
+          title="Global Trash for this client"
+        >
+          {trashMode ? "Back to Files" : "View Trash (Global)"}
         </button>
 
         {/* Upload */}
@@ -270,13 +378,19 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
             border: "1px solid #ccc",
             padding: "6px 10px",
             borderRadius: 6,
-            cursor: perms.canUpload ? "pointer" : "not-allowed",
-            opacity: perms.canUpload ? 1 : 0.5,
+            cursor: perms.canUpload && !trashMode ? "pointer" : "not-allowed",
+            opacity: perms.canUpload && !trashMode ? 1 : 0.5,
           }}
-          title={perms.canUpload ? "Upload file" : "Uploads disabled in this tab"}
+          title={
+            trashMode
+              ? "Uploads disabled while viewing Trash"
+              : perms.canUpload
+              ? "Upload file"
+              : "Uploads disabled in this tab"
+          }
         >
           Upload file
-          <input type="file" onChange={handleUpload} style={{ display: "none" }} disabled={!perms.canUpload} />
+          <input type="file" onChange={handleUpload} style={{ display: "none" }} disabled={!perms.canUpload || trashMode} />
         </label>
 
         {/* Mode badge */}
@@ -293,12 +407,28 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
         >
           {perms.canUpload || perms.canDelete || perms.canMkdir || perms.canWriteText ? "Editable" : "Read-only"}
         </span>
+
+        {trashMode && (
+          <span
+            style={{
+              fontSize: 12,
+              padding: "4px 8px",
+              borderRadius: 999,
+              border: "1px solid #f0c",
+              color: "#a00050",
+              background: "#fff5fb",
+            }}
+            title="Global Trash view for this client"
+          >
+            Global Trash
+          </span>
+        )}
       </div>
 
       {/* Breadcrumbs */}
       <div style={{ marginTop: 10, fontSize: 14 }}>
-        <span style={{ cursor: "default", color: "#999" }} title="This tab is locked to its base folder">
-          root
+        <span style={{ cursor: "default", color: "#999" }}>
+          {trashMode ? "TRASH" : "root"}
         </span>
 
         {crumbs.map((c, i) => (
@@ -316,7 +446,7 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
 
       {/* Create tools */}
       <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        <div style={{ border: "1px solid #eee", padding: 12, borderRadius: 8, opacity: perms.canMkdir ? 1 : 0.6 }}>
+        <div style={{ border: "1px solid #eee", padding: 12, borderRadius: 8, opacity: perms.canMkdir && !trashMode ? 1 : 0.6 }}>
           <div style={{ fontWeight: 600, marginBottom: 8 }}>New folder</div>
           <div style={{ display: "flex", gap: 8 }}>
             <input
@@ -324,31 +454,31 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
               placeholder="e.g. 08 Queries"
               value={newFolderName}
               onChange={(e) => setNewFolderName(e.target.value)}
-              disabled={!perms.canMkdir}
+              disabled={!perms.canMkdir || trashMode}
             />
-            <button onClick={handleCreateFolder} disabled={loading || !client || !perms.canMkdir}>
+            <button onClick={handleCreateFolder} disabled={loading || !client || !perms.canMkdir || trashMode}>
               Create
             </button>
           </div>
         </div>
 
-        <div style={{ border: "1px solid #eee", padding: 12, borderRadius: 8, opacity: perms.canWriteText ? 1 : 0.6 }}>
+        <div style={{ border: "1px solid #eee", padding: 12, borderRadius: 8, opacity: perms.canWriteText && !trashMode ? 1 : 0.6 }}>
           <div style={{ fontWeight: 600, marginBottom: 8 }}>New note</div>
           <input
             style={{ width: "100%", padding: 8, marginBottom: 8 }}
             placeholder="File name (e.g. client-note.txt)"
             value={newNoteName}
             onChange={(e) => setNewNoteName(e.target.value)}
-            disabled={!perms.canWriteText}
+            disabled={!perms.canWriteText || trashMode}
           />
           <textarea
             style={{ width: "100%", padding: 8, minHeight: 70, marginBottom: 8 }}
             placeholder="Type your note..."
             value={newNoteText}
             onChange={(e) => setNewNoteText(e.target.value)}
-            disabled={!perms.canWriteText}
+            disabled={!perms.canWriteText || trashMode}
           />
-          <button onClick={handleCreateNote} disabled={loading || !client || !perms.canWriteText}>
+          <button onClick={handleCreateNote} disabled={loading || !client || !perms.canWriteText || trashMode}>
             Save note
           </button>
         </div>
@@ -359,7 +489,7 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
         {loading ? (
           <div>Loading…</div>
         ) : items.length === 0 ? (
-          <div>No files/folders here yet.</div>
+          <div>{trashMode ? "Trash is empty ✅" : "No files/folders here yet."}</div>
         ) : (
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
@@ -382,7 +512,10 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
                     {it.type === "dir" ? (
                       <span
                         style={{ cursor: "pointer", textDecoration: "underline" }}
-                        onClick={() => safeSetPath(joinPath(path, it.name))}
+                        onClick={() => {
+                          if (trashMode) setTrashRel(joinPath(trashRel, it.name));
+                          else safeSetPath(joinPath(path, it.name));
+                        }}
                         title="Open folder"
                       >
                         📁 {it.name}
@@ -395,7 +528,12 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
                   <td style={{ borderBottom: "1px solid #f2f2f2", padding: 8 }}>{it.type}</td>
 
                   <td style={{ borderBottom: "1px solid #f2f2f2", padding: 8 }}>
-                    {it.type === "file" ? (
+                    {trashMode ? (
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        {it.type === "file" && <button onClick={() => handleDownload(it.name)}>Download</button>}
+                        <button onClick={() => handleRestore(it.name)}>Restore</button>
+                      </div>
+                    ) : it.type === "file" ? (
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                         <button onClick={() => handleDownload(it.name)}>Download</button>
                         <button onClick={() => handleTrash(it.name)} disabled={!perms.canDelete}>
