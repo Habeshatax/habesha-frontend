@@ -165,7 +165,7 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
     setMsg("Moving to Trash...");
 
     try {
-      await trashItem(client, path, name);
+      await trashItem(client, path, String(name).trim());
       setMsg("Moved to Trash ✅");
       await refresh(path);
     } catch (ex) {
@@ -178,7 +178,8 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
     setErr("");
     setMsg("Downloading...");
     try {
-      const blob = await downloadFile(client, path, name);
+      const blob = await downloadFile(client, path, String(name).trim());
+
       const url = URL.createObjectURL(blob);
 
       const a = document.createElement("a");
