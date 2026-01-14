@@ -143,11 +143,16 @@ export async function downloadFile(client, path = "", fileName) {
 
 // ✅ Trash (soft delete)
 // POST /api/clients/:client/trash?file=...&path=...
-export async function trashItem(client, path = "", fileName) {
-  const qs = `?file=${encodeURIComponent(fileName)}${path ? `&path=${encodeURIComponent(path)}` : ""}`;
+// ✅ Trash (soft delete)
+// POST /api/clients/:client/trash?path=...
+// body: { name }
+export async function trashItem(client, path = "", name) {
+  const qs = path ? `?path=${encodeURIComponent(path)}` : "";
 
   return apiFetch(`/api/clients/${encodeURIComponent(client)}/trash${qs}`, {
     method: "POST",
+    body: JSON.stringify({ name: String(name || "").trim() }),
   });
 }
+
 
