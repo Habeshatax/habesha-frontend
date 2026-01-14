@@ -156,9 +156,6 @@ export async function trashItem(client, path = "", name) {
 /**
  * ♻️ Restore from Trash (FILES + FOLDERS)
  * POST /api/clients/:client/restore?path=...&name=...
- *
- * path = original folder relative path (same one you used when trashing)
- * name = the item name as it exists in Trash (could include __timestamp if it collided)
  */
 export async function restoreFromTrash(client, path = "", name) {
   const qs = `?name=${encodeURIComponent(String(name || "").trim())}${
@@ -167,5 +164,17 @@ export async function restoreFromTrash(client, path = "", name) {
 
   return apiFetch(`/api/clients/${encodeURIComponent(client)}/restore${qs}`, {
     method: "POST",
+  });
+}
+
+/**
+ * 🧨 Empty Trash (hard delete)
+ * DELETE /api/clients/:client/trash?path=...
+ * If path empty => empty entire trash
+ */
+export async function emptyTrash(client, path = "") {
+  const qs = path ? `?path=${encodeURIComponent(path)}` : "";
+  return apiFetch(`/api/clients/${encodeURIComponent(client)}/trash${qs}`, {
+    method: "DELETE",
   });
 }

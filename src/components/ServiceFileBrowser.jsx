@@ -8,7 +8,8 @@ import {
   createFolder,
   createTextFile,
   trashItem,
-  restoreFromTrash, // ✅ NEW
+  restoreFromTrash,
+  emptyTrash,
 } from "../services/api";
 
 function normalize(p) {
@@ -78,9 +79,6 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
     setErr("");
   }, [client, base]);
 
-  // Breadcrumbs:
-  // - normal mode: based on `path` (tab-locked)
-  // - trash mode: based on `trashRel` (global)
   const crumbs = useMemo(() => {
     const clean = trashMode ? normalize(trashRel) : normalize(path);
     if (!clean) return [];
@@ -126,7 +124,6 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, effectivePath]);
 
-  // Normal mode path changes must stay inside base.
   function safeSetPath(next) {
     const n = normalize(next);
     if (!isInside(base, n)) {
@@ -138,22 +135,19 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
 
   function goToCrumb(index) {
     const next = crumbs.slice(0, index + 1).join("/");
-    if (trashMode) {
-      setTrashRel(next);
-    } else {
-      safeSetPath(next);
-    }
+    if (trashMode) setTrashRel(next);
+    else safeSetPath(next);
   }
 
   function goUp() {
     if (!crumbs.length) return;
     const next = crumbs.slice(0, -1).join("/");
+
     if (trashMode) {
       setTrashRel(next);
       return;
     }
 
-    // normal mode
     if (!isInside(base, next)) return;
     safeSetPath(next);
   }
@@ -197,7 +191,6 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
     }
   }
 
-  // ✅ Trash (soft delete)
   async function handleTrash(name) {
     if (!perms.canDelete) {
       setErr("Deleting is disabled in this tab.");
@@ -224,10 +217,8 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
     }
   }
 
-  // ♻️ Restore from Trash (global)
   async function handleRestore(name) {
-    // trashRel represents original folder path (because trash mirrors structure)
-    // restore endpoint expects: path=<original folder> & name=<trashed name>
+    // trashRel mirrors the original folder path
     if (!confirm(`Restore "${name}" from Trash?`)) return;
 
     setErr("");
@@ -243,11 +234,28 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
     }
   }
 
+  async function handleEmptyTrash() {
+    const scope = trashRel ? `TRASH / ${trashRel}` : "ENTIRE TRASH";
+
+    if (!confirm(`Empty ${scope}?\n\nThis permanently deletes everything inside and cannot be undone.`)) return;
+
+    setErr("");
+    setMsg("Emptying Trash...");
+
+    try {
+      await emptyTrash(client, trashRel);
+      setMsg("Trash emptied ✅");
+      await refresh(effectivePath);
+    } catch (ex) {
+      setMsg("");
+      setErr(String(ex.message || ex));
+    }
+  }
+
   async function handleDownload(name) {
     setErr("");
     setMsg("Downloading...");
     try {
-      // In trash mode, we download from TRASH_ROOT + trashRel
       const blob = await downloadFile(client, effectivePath, String(name).trim());
 
       const url = URL.createObjectURL(blob);
@@ -322,9 +330,7 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
     }
   }
 
-  const displayPath = trashMode
-    ? `TRASH / ${trashRel || "(root)"}`
-    : `FILES / ${path || "(tab root)"}`;
+  const displayPath = trashMode ? `TRASH / ${trashRel || "(root)"}` : `FILES / ${path || "(tab root)"}`;
 
   return (
     <div style={{ border: "1px solid #ddd", padding: 16, borderRadius: 8 }}>
@@ -362,7 +368,7 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
             setMsg("");
             setTrashMode((v) => {
               const next = !v;
-              if (next) setTrashRel(""); // always start at trash root
+              if (next) setTrashRel("");
               return next;
             });
           }}
@@ -371,6 +377,12 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
         >
           {trashMode ? "Back to Files" : "View Trash (Global)"}
         </button>
+
+        {trashMode && (
+          <button onClick={handleEmptyTrash} disabled={loading || !client}>
+            Empty Trash
+          </button>
+        )}
 
         {/* Upload */}
         <label
@@ -390,7 +402,12 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
           }
         >
           Upload file
-          <input type="file" onChange={handleUpload} style={{ display: "none" }} disabled={!perms.canUpload || trashMode} />
+          <input
+            type="file"
+            onChange={handleUpload}
+            style={{ display: "none" }}
+            disabled={!perms.canUpload || trashMode}
+          />
         </label>
 
         {/* Mode badge */}
@@ -427,9 +444,7 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
 
       {/* Breadcrumbs */}
       <div style={{ marginTop: 10, fontSize: 14 }}>
-        <span style={{ cursor: "default", color: "#999" }}>
-          {trashMode ? "TRASH" : "root"}
-        </span>
+        <span style={{ cursor: "default", color: "#999" }}>{trashMode ? "TRASH" : "root"}</span>
 
         {crumbs.map((c, i) => (
           <span key={i}>
@@ -446,7 +461,14 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
 
       {/* Create tools */}
       <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        <div style={{ border: "1px solid #eee", padding: 12, borderRadius: 8, opacity: perms.canMkdir && !trashMode ? 1 : 0.6 }}>
+        <div
+          style={{
+            border: "1px solid #eee",
+            padding: 12,
+            borderRadius: 8,
+            opacity: perms.canMkdir && !trashMode ? 1 : 0.6,
+          }}
+        >
           <div style={{ fontWeight: 600, marginBottom: 8 }}>New folder</div>
           <div style={{ display: "flex", gap: 8 }}>
             <input
@@ -462,7 +484,14 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
           </div>
         </div>
 
-        <div style={{ border: "1px solid #eee", padding: 12, borderRadius: 8, opacity: perms.canWriteText && !trashMode ? 1 : 0.6 }}>
+        <div
+          style={{
+            border: "1px solid #eee",
+            padding: 12,
+            borderRadius: 8,
+            opacity: perms.canWriteText && !trashMode ? 1 : 0.6,
+          }}
+        >
           <div style={{ fontWeight: 600, marginBottom: 8 }}>New note</div>
           <input
             style={{ width: "100%", padding: 8, marginBottom: 8 }}
