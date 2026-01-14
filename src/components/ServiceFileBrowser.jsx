@@ -10,6 +10,7 @@ import {
   trashItem,
   restoreFromTrash,
   emptyTrash,
+  deleteTrashItem,
 } from "../services/api";
 
 function normalize(p) {
@@ -39,7 +40,6 @@ const TRASH_ROOT = "05 Downloads/_Trash";
 export default function ServiceFileBrowser({ client, basePath, permissions }) {
   const base = useMemo(() => normalize(basePath), [basePath]);
 
-  // ✅ default permissions (full access)
   const perms = useMemo(
     () =>
       permissions || {
@@ -51,13 +51,8 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
     [permissions]
   );
 
-  // Normal browsing (locked to tab base)
   const [path, setPath] = useState(base);
-
-  // Global Trash browsing (NOT locked to tab base)
-  // This is the relative path INSIDE trash (which mirrors original paths)
   const [trashRel, setTrashRel] = useState("");
-
   const [trashMode, setTrashMode] = useState(false);
 
   const [items, setItems] = useState([]);
@@ -88,9 +83,6 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
   const atTabRoot = useMemo(() => normalize(path) === normalize(base), [path, base]);
   const atTrashRoot = useMemo(() => normalize(trashRel) === "", [trashRel]);
 
-  // Backend path to list:
-  // - normal: path
-  // - trash: TRASH_ROOT + trashRel
   const effectivePath = useMemo(() => {
     if (!trashMode) return path;
     return joinPath(TRASH_ROOT, trashRel);
@@ -198,7 +190,7 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
     }
 
     if (trashMode) {
-      setErr("You are viewing Trash. Use Restore instead.");
+      setErr("You are viewing Trash. Use Restore / Delete instead.");
       return;
     }
 
@@ -218,7 +210,6 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
   }
 
   async function handleRestore(name) {
-    // trashRel mirrors the original folder path
     if (!confirm(`Restore "${name}" from Trash?`)) return;
 
     setErr("");
@@ -227,6 +218,29 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
     try {
       await restoreFromTrash(client, trashRel, String(name).trim());
       setMsg("Restored ✅");
+      await refresh(effectivePath);
+    } catch (ex) {
+      setMsg("");
+      setErr(String(ex.message || ex));
+    }
+  }
+
+  async function handleDeleteFromTrash(name) {
+    const scope = trashRel ? `TRASH / ${trashRel}` : "TRASH ROOT";
+
+    if (
+      !confirm(
+        `Permanently delete "${name}" from ${scope}?\n\nThis cannot be undone.`
+      )
+    )
+      return;
+
+    setErr("");
+    setMsg("Deleting permanently...");
+
+    try {
+      await deleteTrashItem(client, trashRel, String(name).trim());
+      setMsg("Deleted permanently ✅");
       await refresh(effectivePath);
     } catch (ex) {
       setMsg("");
@@ -410,7 +424,6 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
           />
         </label>
 
-        {/* Mode badge */}
         <span
           style={{
             fontSize: 12,
@@ -561,6 +574,7 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                         {it.type === "file" && <button onClick={() => handleDownload(it.name)}>Download</button>}
                         <button onClick={() => handleRestore(it.name)}>Restore</button>
+                        <button onClick={() => handleDeleteFromTrash(it.name)}>Delete</button>
                       </div>
                     ) : it.type === "file" ? (
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>

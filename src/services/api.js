@@ -132,7 +132,7 @@ export async function deleteFile(client, path = "", fileName) {
   });
 }
 
-// ✅ Download as BLOB (works with your ServiceFileBrowser download code)
+// ✅ Download as BLOB
 export async function downloadFile(client, path = "", fileName) {
   const qs = `?file=${encodeURIComponent(fileName)}${path ? `&path=${encodeURIComponent(path)}` : ""}`;
   return apiFetch(`/api/clients/${encodeURIComponent(client)}/download${qs}`, {
@@ -142,8 +142,6 @@ export async function downloadFile(client, path = "", fileName) {
 }
 
 // ✅ Trash (soft delete)
-// POST /api/clients/:client/trash?path=...
-// body: { name }
 export async function trashItem(client, path = "", name) {
   const qs = path ? `?path=${encodeURIComponent(path)}` : "";
 
@@ -170,11 +168,24 @@ export async function restoreFromTrash(client, path = "", name) {
 /**
  * 🧨 Empty Trash (hard delete)
  * DELETE /api/clients/:client/trash?path=...
- * If path empty => empty entire trash
  */
 export async function emptyTrash(client, path = "") {
   const qs = path ? `?path=${encodeURIComponent(path)}` : "";
   return apiFetch(`/api/clients/${encodeURIComponent(client)}/trash${qs}`, {
+    method: "DELETE",
+  });
+}
+
+/**
+ * ❌ Delete ONE item from Trash permanently
+ * DELETE /api/clients/:client/trashItem?path=...&name=...
+ */
+export async function deleteTrashItem(client, path = "", name) {
+  const qs = `?name=${encodeURIComponent(String(name || "").trim())}${
+    path ? `&path=${encodeURIComponent(path)}` : ""
+  }`;
+
+  return apiFetch(`/api/clients/${encodeURIComponent(client)}/trashItem${qs}`, {
     method: "DELETE",
   });
 }
