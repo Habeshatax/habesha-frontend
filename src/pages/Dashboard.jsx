@@ -1,419 +1,179 @@
 // src/pages/Dashboard.jsx (FULL FILE)
 
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { createClient, listClients } from "../services/api";
 import { useAuth } from "../context/AuthContext";
+import { listClients } from "../services/api";
+
+// If you already use ServiceFileBrowser in your dashboard, keep this import.
+// If not, you can remove it.
 import ServiceFileBrowser from "../components/ServiceFileBrowser";
 
+function safeRole(user) {
+  return user?.role === "admin" ? "admin" : "client";
+}
+
 export default function Dashboard() {
-  const navigate = useNavigate();
-  const { user, loading: authLoading } = useAuth();
+  const { user, logout } = useAuth();
+  const role = safeRole(user);
 
-  const role = user?.role || "admin";
-  const isClient = role === "client";
-  const clientFolder = user?.client || "";
-
+  // Admin: list of clients
   const [clients, setClients] = useState([]);
   const [selectedClient, setSelectedClient] = useState("");
-  const [loadingClients, setLoadingClients] = useState(true);
+  const [loadingClients, setLoadingClients] = useState(false);
+  const [clientsError, setClientsError] = useState("");
 
-  // Create client form (admin only)
-  const [newClient, setNewClient] = useState("");
-  const [businessType, setBusinessType] = useState("limited_company");
-  const [services, setServices] = useState({
-    self_assessment: false,
-    landlords: false,
-    limited_company: true,
-    payroll: true,
-    vat_mtd: false,
-    bookkeeping: true,
-    home_office: false,
-  });
-
-  const [creating, setCreating] = useState(false);
-  const [msg, setMsg] = useState("");
-  const [err, setErr] = useState("");
-
-  // Tabs -> maps to top-level folders created by backend
-  const allTabs = useMemo(
+  // Tabs (match your folder structure)
+  const tabs = useMemo(
     () => [
-      { key: "eng", label: "Engagement Letter", path: "00 Engagement Letter" },
-      { key: "id", label: "Proof of ID", path: "01 Proof of ID" },
-      { key: "comp", label: "Compliance", path: "02 Compliance" },
-      { key: "work", label: "Work", path: "03 Work" },
-      { key: "personal", label: "Personal", path: "04 Personal" },
-      { key: "downloads", label: "Downloads", path: "05 Downloads" },
-      { key: "trash", label: "Trash", path: "05 Downloads/_Trash" },
+      { key: "engagement", label: "Engagement", basePath: "00 Engagement Letter" },
+      { key: "proof", label: "Proof of ID", basePath: "01 Proof of ID" },
+      { key: "compliance", label: "Compliance", basePath: "02 Compliance" },
+      { key: "work", label: "Work", basePath: "03 Work" },
+      { key: "downloads", label: "Downloads", basePath: "05 Downloads" },
     ],
     []
   );
 
-  // Client-safe tabs (you can add read-only ones if you want)
-  const clientTabs = useMemo(
-    () => [
-      { key: "work", label: "Work", path: "03 Work" },
-      { key: "downloads", label: "Downloads", path: "05 Downloads" },
-      { key: "trash", label: "Trash", path: "05 Downloads/_Trash" },
-      // Optional read-only tabs for client:
-      // { key: "comp", label: "Compliance (Read-only)", path: "02 Compliance" },
-      // { key: "id", label: "Proof of ID (Read-only)", path: "01 Proof of ID" },
-    ],
-    []
-  );
+  const [tabKey, setTabKey] = useState("downloads");
+  const activeTab = useMemo(() => tabs.find((t) => t.key === tabKey) || tabs[0], [tabs, tabKey]);
 
-  const tabs = isClient ? clientTabs : allTabs;
+  // Determine which client folder to browse
+  const clientToBrowse = role === "admin" ? selectedClient : user?.client || "";
 
-  // Permissions per tab
-  const adminTabPermissions = useMemo(
-    () => ({
-      eng: { canUpload: false, canDelete: false, canMkdir: false, canWriteText: false },
-      id: { canUpload: true, canDelete: false, canMkdir: true, canWriteText: true },
-      comp: { canUpload: true, canDelete: true, canMkdir: true, canWriteText: true },
-      work: { canUpload: true, canDelete: true, canMkdir: true, canWriteText: true },
-      personal: { canUpload: true, canDelete: false, canMkdir: true, canWriteText: true },
-      downloads: { canUpload: true, canDelete: true, canMkdir: true, canWriteText: true },
-      trash: { canUpload: false, canDelete: true, canMkdir: false, canWriteText: false }, // delete here = delete in trash UI
-    }),
-    []
-  );
-
-  // Client: only write inside Work + Downloads. Everything else read-only.
-  const clientTabPermissions = useMemo(
-    () => ({
-      work: { canUpload: true, canDelete: true, canMkdir: true, canWriteText: true },
-      downloads: { canUpload: true, canDelete: true, canMkdir: true, canWriteText: true },
-      trash: { canUpload: false, canDelete: true, canMkdir: false, canWriteText: false },
-      // If you enable extra read-only client tabs, add them here:
-      comp: { canUpload: false, canDelete: false, canMkdir: false, canWriteText: false },
-      id: { canUpload: false, canDelete: false, canMkdir: false, canWriteText: false },
-      eng: { canUpload: false, canDelete: false, canMkdir: false, canWriteText: false },
-      personal: { canUpload: false, canDelete: false, canMkdir: false, canWriteText: false },
-    }),
-    []
-  );
-
-  const tabPermissions = isClient ? clientTabPermissions : adminTabPermissions;
-
-  const [activeTab, setActiveTab] = useState(tabs[0]?.key || "work");
-
-  // Keep activeTab valid when switching roles/tabs set
-  useEffect(() => {
-    const allowedKeys = new Set(tabs.map((t) => t.key));
-    if (!allowedKeys.has(activeTab)) {
-      setActiveTab(tabs[0]?.key || "work");
+  // Permissions per tab (you can tweak)
+  const permissions = useMemo(() => {
+    // Example: make Engagement/Proof read-only for clients if you want
+    if (role === "client") {
+      if (tabKey === "engagement") return { canUpload: true, canDelete: true, canMkdir: false, canWriteText: true };
+      if (tabKey === "proof") return { canUpload: true, canDelete: true, canMkdir: true, canWriteText: true };
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isClient]);
+    // Admin default: full access
+    return { canUpload: true, canDelete: true, canMkdir: true, canWriteText: true };
+  }, [role, tabKey]);
 
-  const activePath = useMemo(() => tabs.find((t) => t.key === activeTab)?.path || "", [activeTab, tabs]);
-  const activePerms = useMemo(() => tabPermissions[activeTab] || null, [activeTab, tabPermissions]);
-
-  // Keep services aligned with businessType (admin only)
+  // Admin: load clients list
   useEffect(() => {
-    if (isClient) return;
+    if (role !== "admin") return;
 
-    setServices((prev) => {
-      const next = { ...prev };
-
-      if (businessType === "self_assessment") {
-        next.self_assessment = true;
-        next.landlords = false;
-        next.limited_company = false;
-      } else if (businessType === "landlords") {
-        next.landlords = true;
-        next.self_assessment = false;
-        next.limited_company = false;
-      } else if (businessType === "limited_company") {
-        next.limited_company = true;
-        next.self_assessment = false;
-        next.landlords = false;
+    let cancelled = false;
+    async function load() {
+      setLoadingClients(true);
+      setClientsError("");
+      try {
+        const data = await listClients();
+        const list = data?.clients || [];
+        if (!cancelled) {
+          setClients(list);
+          // auto-select first client if none selected
+          if (!selectedClient && list.length > 0) {
+            setSelectedClient(list[0].client);
+          }
+        }
+      } catch (e) {
+        if (!cancelled) setClientsError(String(e?.message || e));
+      } finally {
+        if (!cancelled) setLoadingClients(false);
       }
-      return next;
-    });
-  }, [businessType, isClient]);
-
-  async function refreshClients(keepSelection = true) {
-    if (isClient) return;
-
-    setLoadingClients(true);
-    setErr("");
-    setMsg("");
-
-    try {
-      const data = await listClients();
-      const list = data.clients || [];
-      setClients(list);
-
-      if (keepSelection && selectedClient && list.includes(selectedClient)) {
-        // keep selection
-      } else {
-        setSelectedClient(list[0] || "");
-      }
-    } catch (e) {
-      setErr(String(e.message || e));
-    } finally {
-      setLoadingClients(false);
-    }
-  }
-
-  // Initial load
-  useEffect(() => {
-    if (authLoading) return;
-
-    // If no user loaded, bounce to login
-    if (!user) {
-      navigate("/login", { replace: true });
-      return;
     }
 
-    // Client: auto-select their folder
-    if (isClient) {
-      setSelectedClient(clientFolder);
-      setLoadingClients(false);
-      return;
-    }
-
-    // Admin: load clients list
-    refreshClients(false);
+    load();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authLoading, user, isClient, clientFolder]);
-
-  function toggleService(key) {
-    setServices((prev) => ({ ...prev, [key]: !prev[key] }));
-  }
-
-  function selectedServicesArray() {
-    return Object.entries(services)
-      .filter(([, v]) => v)
-      .map(([k]) => k);
-  }
-
-  async function handleCreateClient(e) {
-    if (e?.preventDefault) e.preventDefault();
-    if (creating || isClient) return;
-
-    const name = newClient.trim();
-    if (!name) return;
-
-    setErr("");
-    setMsg("");
-    setCreating(true);
-
-    try {
-      const payload = {
-        name,
-        businessType,
-        services: selectedServicesArray(),
-      };
-
-      const data = await createClient(payload);
-      setMsg(`Created: ${data.client}`);
-      setNewClient("");
-
-      await refreshClients(false);
-      setSelectedClient(data.client);
-
-      setActiveTab("comp");
-    } catch (e2) {
-      setErr(String(e2.message || e2));
-    } finally {
-      setCreating(false);
-    }
-  }
-
-  function logout() {
-    localStorage.removeItem("token");
-    sessionStorage.removeItem("token");
-    window.location.replace("/login");
-  }
+  }, [role]);
 
   return (
-    <div style={{ padding: 24 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+    <div className="ui-shell">
+      {/* Top bar */}
+      <div className="ui-topbar" style={{ marginBottom: 18 }}>
         <div>
-          <h1 style={{ margin: 0 }}>Dashboard</h1>
-          <div style={{ marginTop: 4, fontSize: 13, color: "#666" }}>
-            Signed in as: <strong>{user?.email || "unknown"}</strong> • Role:{" "}
-            <strong>{isClient ? "client" : "admin"}</strong>
-            {isClient && clientFolder ? (
-              <>
-                {" "}
-                • Client folder: <strong>{clientFolder}</strong>
-              </>
-            ) : null}
+          <h1 className="ui-title">Dashboard</h1>
+          <div className="ui-sub">
+            Signed in as <strong>{role === "admin" ? "Admin" : "Client"}</strong>
+            {user?.email ? <> · {user.email}</> : null}
+            {role === "client" && user?.client ? <> · Folder: <strong>{user.client}</strong></> : null}
           </div>
         </div>
 
-        <button onClick={logout}>Logout</button>
+        <div className="ui-row">
+          <button className="ui-btn" onClick={logout}>
+            Log out
+          </button>
+        </div>
       </div>
 
-      <p style={{ marginTop: 10, color: "#555" }}>
-        {isClient
-          ? "Upload and manage your documents in Work / Downloads. Use Trash to restore or permanently delete."
-          : "Create clients + browse folders by service (tabs)."}
-      </p>
+      {/* Admin: choose client */}
+      {role === "admin" && (
+        <div className="ui-card ui-card-pad" style={{ marginBottom: 14 }}>
+          <div style={{ fontWeight: 700, marginBottom: 10 }}>Admin controls</div>
 
-      {/* Admin-only: Create + Select client */}
-      {!isClient && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 14 }}>
-          {/* CREATE */}
-          <div style={{ border: "1px solid #ddd", padding: 16, borderRadius: 8 }}>
-            <h3 style={{ marginTop: 0 }}>Create client</h3>
-
-            <form onSubmit={handleCreateClient}>
-              <div style={{ display: "flex", gap: 8 }}>
-                <input
-                  style={{ flex: 1, padding: 8 }}
-                  placeholder="e.g. Bubbly Day Nursery Ltd"
-                  value={newClient}
-                  onChange={(e) => setNewClient(e.target.value)}
-                />
-                <button type="submit" disabled={creating || !newClient.trim()}>
-                  {creating ? "Creating..." : "Create"}
-                </button>
-              </div>
-
-              <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <div>
-                  <div style={{ fontSize: 13, color: "#555", marginBottom: 6 }}>Business type</div>
-                  <select
-                    style={{ width: "100%", padding: 8 }}
-                    value={businessType}
-                    onChange={(e) => setBusinessType(e.target.value)}
-                  >
-                    <option value="self_assessment">Self Assessment (sole trader)</option>
-                    <option value="landlords">Landlords</option>
-                    <option value="limited_company">Limited Company</option>
-                  </select>
-                </div>
-
-                <div>
-                  <div style={{ fontSize: 13, color: "#555", marginBottom: 6 }}>Services (folders)</div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 6 }}>
-                    <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                      <input
-                        type="checkbox"
-                        checked={services.self_assessment}
-                        onChange={() => toggleService("self_assessment")}
-                        disabled={businessType === "self_assessment"}
-                      />
-                      Self Assessment
-                    </label>
-
-                    <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                      <input
-                        type="checkbox"
-                        checked={services.landlords}
-                        onChange={() => toggleService("landlords")}
-                        disabled={businessType === "landlords"}
-                      />
-                      Landlords
-                    </label>
-
-                    <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                      <input
-                        type="checkbox"
-                        checked={services.limited_company}
-                        onChange={() => toggleService("limited_company")}
-                        disabled={businessType === "limited_company"}
-                      />
-                      Limited Company
-                    </label>
-
-                    <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                      <input type="checkbox" checked={services.bookkeeping} onChange={() => toggleService("bookkeeping")} />
-                      Bookkeeping
-                    </label>
-
-                    <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                      <input type="checkbox" checked={services.vat_mtd} onChange={() => toggleService("vat_mtd")} />
-                      MTD VAT
-                    </label>
-
-                    <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                      <input type="checkbox" checked={services.payroll} onChange={() => toggleService("payroll")} />
-                      Payroll
-                    </label>
-
-                    <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                      <input type="checkbox" checked={services.home_office} onChange={() => toggleService("home_office")} />
-                      Home Office / Other
-                    </label>
-                  </div>
-                </div>
-              </div>
-            </form>
-          </div>
-
-          {/* SELECT */}
-          <div style={{ border: "1px solid #ddd", padding: 16, borderRadius: 8 }}>
-            <h3 style={{ marginTop: 0 }}>Select client</h3>
-
-            {loadingClients ? (
-              <div>Loading clients…</div>
-            ) : (
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {loadingClients ? (
+            <div className="ui-note">Loading clients…</div>
+          ) : clientsError ? (
+            <div className="ui-err">{clientsError}</div>
+          ) : clients.length === 0 ? (
+            <div className="ui-note">No clients found yet.</div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10 }}>
+              <div>
+                <label className="ui-note" style={{ display: "block", marginBottom: 6 }}>
+                  Select a client to browse folders
+                </label>
                 <select
-                  style={{ flex: 1, padding: 8 }}
+                  className="ui-input"
                   value={selectedClient}
                   onChange={(e) => setSelectedClient(e.target.value)}
                 >
-                  <option value="">-- select --</option>
                   {clients.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
+                    <option key={c.client} value={c.client}>
+                      {c.client} ({c.email})
                     </option>
                   ))}
                 </select>
-
-                <button onClick={() => refreshClients(true)}>Refresh</button>
               </div>
-            )}
 
-            {selectedClient && (
-              <div style={{ marginTop: 10, fontSize: 14, color: "#333" }}>
-                Active client: <strong>{selectedClient}</strong>
+              <div className="ui-note">
+                Tip: This is the backend folder name created during registration.
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       )}
 
-      {msg && <div style={{ marginTop: 12, color: "#0a7" }}>{msg}</div>}
-      {err && <div style={{ marginTop: 12, color: "crimson", whiteSpace: "pre-wrap" }}>{err}</div>}
-
       {/* Tabs */}
-      <div style={{ marginTop: 18 }}>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      <div className="ui-card ui-card-pad" style={{ marginBottom: 14 }}>
+        <div className="ui-row" style={{ flexWrap: "wrap" }}>
           {tabs.map((t) => (
             <button
               key={t.key}
-              onClick={() => setActiveTab(t.key)}
-              style={{
-                padding: "8px 10px",
-                borderRadius: 8,
-                border: "1px solid #ccc",
-                background: activeTab === t.key ? "#eee" : "white",
-                cursor: "pointer",
-              }}
-              disabled={!selectedClient}
-              title={t.path}
+              type="button"
+              className={`ui-tab ${tabKey === t.key ? "ui-tab-active" : ""}`}
+              onClick={() => setTabKey(t.key)}
             >
               {t.label}
             </button>
           ))}
         </div>
 
-        <div style={{ marginTop: 12 }}>
-          {!selectedClient ? (
-            <div style={{ padding: 16, border: "1px dashed #bbb", borderRadius: 8 }}>
-              {isClient ? "No client folder assigned." : "Select a client to view folders."}
-            </div>
-          ) : (
-            <ServiceFileBrowser client={selectedClient} basePath={activePath} permissions={activePerms} />
-          )}
+        <div className="ui-sub" style={{ marginTop: 10 }}>
+          Current section: <strong>{activeTab.label}</strong>
         </div>
+      </div>
+
+      {/* Main browser */}
+      <div className="ui-card ui-card-pad">
+        {!clientToBrowse ? (
+          <div className="ui-note">
+            {role === "admin" ? "Select a client above to browse their folders." : "No client folder assigned."}
+          </div>
+        ) : (
+          <ServiceFileBrowser
+            client={clientToBrowse}
+            basePath={activeTab.basePath}
+            permissions={permissions}
+          />
+        )}
       </div>
     </div>
   );

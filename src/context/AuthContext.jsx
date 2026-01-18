@@ -1,7 +1,7 @@
 // src/context/AuthContext.jsx (FULL FILE)
 
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { loginRequest, clientLoginRequest, getMe } from "../services/api";
+import { loginRequest, clientLoginRequest, clientRegister, getMe } from "../services/api";
 
 // --------------------------------------------
 // Helpers for token storage
@@ -29,28 +29,20 @@ function clearToken() {
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [token, setToken] = useState(readToken()); // boot from storage
+  const [token, setToken] = useState(readToken());
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const isLoggedIn = !!token;
 
-  // --------------------------
-  // Admin Login (POST /login)
-  // --------------------------
-  const login = async ({ email, password, remember = true }) => {
+  // Admin login
+  const loginAdmin = async ({ email, password, remember = true }) => {
     const cleanEmail = String(email || "").trim().toLowerCase();
     const cleanPassword = String(password || "").trim();
-
-    if (!cleanEmail || !cleanPassword) {
-      throw new Error("Please enter email and password");
-    }
+    if (!cleanEmail || !cleanPassword) throw new Error("Please enter email and password");
 
     const data = await loginRequest(cleanEmail, cleanPassword);
-
-    if (!data?.token) {
-      throw new Error("Login failed: token not returned by server");
-    }
+    if (!data?.token) throw new Error("Login failed: token not returned by server");
 
     saveToken(data.token, remember);
     setToken(data.token);
@@ -59,22 +51,14 @@ export function AuthProvider({ children }) {
     return data;
   };
 
-  // --------------------------
-  // Client Login (POST /client-login)
-  // --------------------------
+  // Client login
   const loginClient = async ({ email, password, remember = true }) => {
     const cleanEmail = String(email || "").trim().toLowerCase();
     const cleanPassword = String(password || "").trim();
-
-    if (!cleanEmail || !cleanPassword) {
-      throw new Error("Please enter email and password");
-    }
+    if (!cleanEmail || !cleanPassword) throw new Error("Please enter email and password");
 
     const data = await clientLoginRequest(cleanEmail, cleanPassword);
-
-    if (!data?.token) {
-      throw new Error("Login failed: token not returned by server");
-    }
+    if (!data?.token) throw new Error("Login failed: token not returned by server");
 
     saveToken(data.token, remember);
     setToken(data.token);
@@ -83,15 +67,26 @@ export function AuthProvider({ children }) {
     return data;
   };
 
-  // Logout (client-side only)
+  // Client registration -> backend creates folder + user entry + returns token
+  const registerClientAccount = async (payload, remember = true) => {
+    const data = await clientRegister(payload);
+    if (!data?.token) throw new Error("Register failed: token not returned by server");
+
+    saveToken(data.token, remember);
+    setToken(data.token);
+    setUser(data.user || null);
+
+    return data;
+  };
+
+  // Logout
   const logout = () => {
     clearToken();
     setToken("");
     setUser(null);
   };
 
-  // On app load/refresh:
-  // If token exists -> call /api/me to validate + load user
+  // On app load: validate token
   useEffect(() => {
     let cancelled = false;
 
@@ -99,7 +94,6 @@ export function AuthProvider({ children }) {
       setLoading(true);
 
       const t = readToken();
-
       if (!t) {
         if (!cancelled) {
           setToken("");
@@ -110,8 +104,7 @@ export function AuthProvider({ children }) {
       }
 
       try {
-        const me = await getMe(); // expected: { ok:true, user }
-
+        const me = await getMe();
         if (!cancelled) {
           setToken(t);
           setUser(me?.user || null);
@@ -128,7 +121,6 @@ export function AuthProvider({ children }) {
     };
 
     init();
-
     return () => {
       cancelled = true;
     };
@@ -140,8 +132,9 @@ export function AuthProvider({ children }) {
       user,
       isLoggedIn,
       loading,
-      login,
-      loginClient, // ✅ added
+      loginAdmin,
+      loginClient,
+      registerClientAccount,
       logout,
     }),
     [token, user, isLoggedIn, loading]

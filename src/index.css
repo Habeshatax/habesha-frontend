@@ -1,68 +1,306 @@
+/* src/index.css (FULL FILE) */
+
+/* -----------------------------
+   Base (Vite default-ish)
+------------------------------ */
 :root {
   font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
 
+  /* Let the browser handle light/dark UI controls */
   color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  /* App theme tokens */
+  --bg: #0f1115;
+  --panel: #151822;
+  --panel2: #111420;
+  --text: rgba(255, 255, 255, 0.92);
+  --muted: rgba(255, 255, 255, 0.65);
+
+  --border: rgba(255, 255, 255, 0.12);
+  --border2: rgba(255, 255, 255, 0.18);
+
+  --primary: #646cff;
+  --primary2: #535bf2;
+
+  --ok-border: #2b7a57;
+  --ok-bg: rgba(40, 167, 69, 0.12);
+  --ok-text: #42d08a;
+
+  --err-border: #a93b3b;
+  --err-bg: rgba(255, 0, 0, 0.10);
+  --err-text: #ff6b6b;
+
+  --radius: 12px;
 }
 
+/* Global box sizing */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* Links */
 a {
   font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
+  color: var(--primary);
+  text-decoration: none;
 }
 a:hover {
-  color: #535bf2;
+  color: var(--primary2);
 }
 
+/* -----------------------------
+   App layout (IMPORTANT)
+   Don't center everything
+------------------------------ */
+html,
+body {
+  height: 100%;
+}
 body {
   margin: 0;
-  display: flex;
-  place-items: center;
   min-width: 320px;
   min-height: 100vh;
+
+  /* App pages should flow normally */
+  display: block;
+  place-items: unset;
+
+  background: var(--bg);
+  color: var(--text);
 }
 
+#root {
+  min-height: 100vh;
+  width: 100%;
+}
+
+/* Headings */
+h1,
+h2,
+h3 {
+  margin: 0;
+}
 h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
+  font-size: 2rem;
+  line-height: 1.2;
 }
 
+/* Buttons - safe defaults */
 button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  padding: 0.6em 1em;
   font-size: 1em;
-  font-weight: 500;
+  font-weight: 600;
   font-family: inherit;
-  background-color: #1a1a1a;
+  background-color: rgba(255, 255, 255, 0.06);
+  color: var(--text);
   cursor: pointer;
-  transition: border-color 0.25s;
+  transition: border-color 0.2s, transform 0.05s, background 0.2s;
 }
 button:hover {
-  border-color: #646cff;
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.08);
+}
+button:active {
+  transform: translateY(1px);
+}
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 button:focus,
 button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
+  outline: 3px auto -webkit-focus-ring-color;
 }
 
+/* Inputs */
+input,
+select,
+textarea {
+  font-family: inherit;
+  color: var(--text);
+}
+input::placeholder,
+textarea::placeholder {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+/* -----------------------------
+   UI Utility Classes (your app)
+------------------------------ */
+.ui-shell {
+  width: 100%;
+  margin: 0 auto;
+  padding: 24px;
+  max-width: 980px;
+}
+
+.ui-topbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.ui-title {
+  margin: 0;
+}
+
+.ui-sub {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.ui-card {
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: var(--radius);
+}
+
+.ui-card-pad {
+  padding: 16px;
+}
+
+.ui-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ui-note {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* Inputs used in Login.jsx */
+.ui-input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.05);
+  outline: none;
+}
+.ui-input:focus {
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+/* Buttons */
+.ui-btn {
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  padding: 10px 14px;
+}
+.ui-btn:hover {
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.ui-btn-primary {
+  border-color: rgba(100, 108, 255, 0.5);
+  background: rgba(100, 108, 255, 0.18);
+}
+.ui-btn-primary:hover {
+  border-color: rgba(100, 108, 255, 0.75);
+  background: rgba(100, 108, 255, 0.24);
+}
+
+/* Tabs (Client/Admin switch) */
+.ui-tab {
+  border-radius: 999px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.05);
+}
+.ui-tab-active {
+  border-color: rgba(100, 108, 255, 0.7);
+  background: rgba(100, 108, 255, 0.18);
+}
+
+/* Error message */
+.ui-err {
+  border: 1px solid var(--err-border);
+  background: var(--err-bg);
+  color: var(--err-text);
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+/* Success message */
+.ui-ok {
+  border: 1px solid var(--ok-border);
+  background: var(--ok-bg);
+  color: var(--ok-text);
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 14px;
+  line-height: 1.4;
+}
+.ui-ok::before {
+  content: "✔";
+  margin-right: 6px;
+  font-weight: 700;
+}
+
+/* -----------------------------
+   Light mode overrides
+------------------------------ */
 @media (prefers-color-scheme: light) {
   :root {
-    color: #213547;
-    background-color: #ffffff;
+    --bg: #ffffff;
+    --panel: #ffffff;
+    --panel2: #ffffff;
+    --text: #213547;
+    --muted: rgba(33, 53, 71, 0.7);
+
+    --border: rgba(33, 53, 71, 0.14);
+    --border2: rgba(33, 53, 71, 0.22);
+
+    --ok-border: #bfe9d0;
+    --ok-bg: #f2fbf6;
+    --ok-text: #0a7a4a;
+
+    --err-border: #f3c2c2;
+    --err-bg: #fff5f5;
+    --err-text: #b00020;
   }
-  a:hover {
-    color: #747bff;
+
+  body {
+    background: var(--bg);
+    color: var(--text);
   }
-  button {
-    background-color: #f9f9f9;
+
+  .ui-card {
+    background: #ffffff;
+  }
+
+  .ui-input {
+    background: #ffffff;
+  }
+
+  button,
+  .ui-btn {
+    background: rgba(33, 53, 71, 0.04);
+    color: var(--text);
+  }
+
+  .ui-btn-primary {
+    border-color: rgba(100, 108, 255, 0.45);
+    background: rgba(100, 108, 255, 0.12);
   }
 }

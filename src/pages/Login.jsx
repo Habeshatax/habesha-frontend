@@ -1,13 +1,16 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+// src/pages/Login.jsx (FULL FILE)
+
+import { useEffect, useRef, useState } from "react";
+import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
 export default function Login() {
   const navigate = useNavigate();
-  const { isLoggedIn, loading, login, loginClient } = useAuth();
+  const { loading, isLoggedIn, loginAdmin, loginClient } = useAuth();
 
-  const [mode, setMode] = useState("admin"); // "admin" | "client"
+  const aliveRef = useRef(true);
 
+  const [mode, setMode] = useState("client"); // "client" | "admin"
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(true);
@@ -15,156 +18,221 @@ export default function Login() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  // If already logged in, redirect to dashboard
+  // ✅ Success + redirect countdown
+  const [success, setSuccess] = useState("");
+  const [redirectIn, setRedirectIn] = useState(null);
+
   useEffect(() => {
-    if (!loading && isLoggedIn) {
-      navigate("/dashboard", { replace: true });
-    }
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
+
+  // ✅ If already logged in, send to dashboard
+  useEffect(() => {
+    if (!loading && isLoggedIn) navigate("/dashboard", { replace: true });
   }, [loading, isLoggedIn, navigate]);
+
+  // ✅ guard to avoid flashing login form when logged in
+  if (!loading && isLoggedIn) return null;
 
   async function handleSubmit(e) {
     e.preventDefault();
     setError("");
+    setSuccess("");
+    setRedirectIn(null);
 
-    const em = email.trim();
-    if (!em || !password) {
-      setError("Please enter email and password");
-      return;
-    }
+    const em = email.trim().toLowerCase();
+    const pw = password.trim();
+
+    if (!em) return setError("Email is required");
+    if (!pw) return setError("Password is required");
 
     setSubmitting(true);
 
     try {
-      const doLogin = mode === "client" ? loginClient : login;
-
-      if (mode === "client" && typeof loginClient !== "function") {
-        throw new Error("Client login not wired yet (loginClient missing in AuthContext)");
+      // ✅ IMPORTANT: AuthContext expects an OBJECT, not (email, password)
+      if (mode === "admin") {
+        await loginAdmin({ email: em, password: pw, remember });
+      } else {
+        await loginClient({ email: em, password: pw, remember });
       }
 
-      const result = await doLogin({ email: em, password, remember });
+      if (!aliveRef.current) return;
 
-      if (!result || !result.token) {
-        throw new Error("Login failed: no token returned");
-      }
+      setSuccess("Signed in successfully ✅");
+      setError("");
 
-      navigate("/dashboard", { replace: true });
+      let seconds = 2;
+      setRedirectIn(seconds);
+
+      const timer = setInterval(() => {
+        seconds -= 1;
+        if (!aliveRef.current) return clearInterval(timer);
+
+        if (seconds <= 0) {
+          clearInterval(timer);
+          navigate("/dashboard", { replace: true });
+        } else {
+          setRedirectIn(seconds);
+        }
+      }, 1000);
     } catch (err) {
-      const msg = String(err?.message || "Login failed");
-      setError(msg === "Failed to fetch" ? "Failed to fetch" : msg);
+      setError(String(err?.message || "Login failed"));
     } finally {
-      setSubmitting(false);
+      if (aliveRef.current) setSubmitting(false);
     }
   }
 
-  if (loading) {
-    return <div style={{ padding: 24 }}>Loading…</div>;
-  }
+  if (loading) return <div className="ui-shell">Loading…</div>;
+
+  const locked = submitting || !!success;
 
   return (
-    <div style={{ padding: 24, maxWidth: 420 }}>
-      <h2>Login</h2>
-
-      {/* Mode toggle */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        <button
-          type="button"
-          onClick={() => setMode("admin")}
-          disabled={submitting}
-          style={{
-            padding: "8px 12px",
-            border: "1px solid #ddd",
-            borderRadius: 8,
-            cursor: submitting ? "not-allowed" : "pointer",
-            background: mode === "admin" ? "#111" : "#fff",
-            color: mode === "admin" ? "#fff" : "#111",
-          }}
-        >
-          Admin
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setMode("client")}
-          disabled={submitting}
-          style={{
-            padding: "8px 12px",
-            border: "1px solid #ddd",
-            borderRadius: 8,
-            cursor: submitting ? "not-allowed" : "pointer",
-            background: mode === "client" ? "#111" : "#fff",
-            color: mode === "client" ? "#fff" : "#111",
-          }}
-        >
-          Client
-        </button>
-
-        <span style={{ marginLeft: "auto", fontSize: 12, color: "#666", alignSelf: "center" }}>
-          Mode: <strong>{mode === "admin" ? "Admin" : "Client"}</strong>
-        </span>
+    <div className="ui-shell" style={{ maxWidth: 560 }}>
+      <div className="ui-topbar" style={{ marginBottom: 18 }}>
+        <div>
+          <h1 className="ui-title" style={{ fontSize: 28 }}>
+            Sign in
+          </h1>
+          <div className="ui-sub">
+            Choose <strong>Client</strong> or <strong>Admin</strong> login.
+          </div>
+        </div>
       </div>
 
-      <form onSubmit={handleSubmit}>
-        <div style={{ marginBottom: 10 }}>
-          <input
-            name="email"
-            placeholder={mode === "client" ? "Client Email" : "Admin Email"}
-            value={email}
-            onChange={(e) => {
-              setEmail(e.target.value);
-              if (error) setError("");
+      <div className="ui-card ui-card-pad">
+        {/* Mode switch */}
+        <div className="ui-row" style={{ marginBottom: 14 }}>
+          <button
+            type="button"
+            className={`ui-tab ${mode === "client" ? "ui-tab-active" : ""}`}
+            onClick={() => {
+              setMode("client");
+              setError("");
+              setSuccess("");
+              setRedirectIn(null);
+              setPassword("");
             }}
-            style={{ width: "100%", padding: 10 }}
-            autoComplete="email"
-          />
-        </div>
+            disabled={locked}
+          >
+            Client login
+          </button>
 
-        <div style={{ marginBottom: 10 }}>
-          <input
-            name="password"
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => {
-              setPassword(e.target.value);
-              if (error) setError("");
+          <button
+            type="button"
+            className={`ui-tab ${mode === "admin" ? "ui-tab-active" : ""}`}
+            onClick={() => {
+              setMode("admin");
+              setError("");
+              setSuccess("");
+              setRedirectIn(null);
+              setPassword("");
             }}
-            style={{ width: "100%", padding: 10 }}
-            autoComplete="current-password"
-          />
-        </div>
-
-        <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <input
-            type="checkbox"
-            checked={remember}
-            onChange={(e) => setRemember(e.target.checked)}
-          />
-          Remember me
-        </label>
-
-        <div style={{ marginTop: 12 }}>
-          <button type="submit" disabled={submitting} style={{ padding: "10px 14px" }}>
-            {submitting ? "Logging in…" : mode === "client" ? "Login as Client" : "Login as Admin"}
+            disabled={locked}
+          >
+            Admin login
           </button>
         </div>
-      </form>
 
-      {error && (
-        <p style={{ color: "red", marginTop: 12, whiteSpace: "pre-wrap" }}>
-          {error}
-        </p>
-      )}
+        <form onSubmit={handleSubmit}>
+          <div style={{ marginBottom: 10 }}>
+            <label
+              htmlFor="email"
+              className="ui-note"
+              style={{ display: "block", marginBottom: 6 }}
+            >
+              Email
+            </label>
+            <input
+              id="email"
+              name="email"
+              className="ui-input"
+              value={email}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                if (error) setError("");
+              }}
+              placeholder="you@example.com"
+              autoComplete="email"
+              disabled={locked}
+            />
+          </div>
 
-      {mode === "client" && (
-        <div style={{ marginTop: 14, fontSize: 12, color: "#666" }}>
-          <div style={{ marginBottom: 6 }}>
-            Client login is restricted to your assigned client folder.
+          <div style={{ marginBottom: 10 }}>
+            <label
+              htmlFor="password"
+              className="ui-note"
+              style={{ display: "block", marginBottom: 6 }}
+            >
+              Password
+            </label>
+            <input
+              id="password"
+              name="password"
+              className="ui-input"
+              type="password"
+              value={password}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                if (error) setError("");
+              }}
+              placeholder="Your password"
+              autoComplete="current-password"
+              disabled={locked}
+            />
           </div>
-          <div>
-            If you get <code>Forbidden (client mismatch)</code>, it means you tried to open another client’s folder.
+
+          <label className="ui-row" style={{ marginTop: 10 }}>
+            <input
+              id="remember"
+              name="remember"
+              type="checkbox"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+              disabled={locked}
+            />
+            <span className="ui-note">Remember me</span>
+          </label>
+
+          <div className="ui-row" style={{ marginTop: 14 }}>
+            <button className="ui-btn ui-btn-primary" type="submit" disabled={locked}>
+              {submitting ? "Signing in…" : success ? "Signed in ✅" : "Sign in"}
+            </button>
+
+            <Link to="/register" style={{ textDecoration: "none" }}>
+              <button className="ui-btn" type="button" disabled={locked}>
+                Create account
+              </button>
+            </Link>
           </div>
-        </div>
-      )}
+
+          {success && (
+            <div className="ui-ok" style={{ marginTop: 12 }}>
+              {success}
+              <div style={{ marginTop: 6 }}>
+                {typeof redirectIn === "number"
+                  ? `Redirecting to dashboard in ${redirectIn}s…`
+                  : "Redirecting…"}
+              </div>
+            </div>
+          )}
+
+          {error ? (
+            <div className="ui-err" style={{ marginTop: 12 }}>
+              {error}
+            </div>
+          ) : null}
+
+          <div style={{ marginTop: 14 }} className="ui-note">
+            {mode === "admin" ? (
+              <>Admin login is for you (practice owner). Clients should use Client login.</>
+            ) : (
+              <>Clients can register and instantly access their folders after login.</>
+            )}
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

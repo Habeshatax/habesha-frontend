@@ -1,5 +1,3 @@
-// src/components/ServiceFileBrowser.jsx (FULL FILE)
-
 import { useEffect, useMemo, useState } from "react";
 import {
   listClientItems,
@@ -8,9 +6,9 @@ import {
   createFolder,
   createTextFile,
   trashItem,
-  restoreFromTrash,
-  emptyTrash,
+  restoreItem,
   deleteTrashItem,
+  emptyTrash,
 } from "../services/api";
 
 function normalize(p) {
@@ -36,8 +34,16 @@ function isInside(base, candidate) {
 }
 
 const TRASH_ROOT = "05 Downloads/_Trash";
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
-export default function ServiceFileBrowser({ client, basePath, permissions }) {
+export default function ServiceFileBrowser({
+  client,
+  basePath,
+  permissions,
+  initialTrashMode = false,
+  uploadHint = "",
+  onUploaded,
+}) {
   const base = useMemo(() => normalize(basePath), [basePath]);
 
   const perms = useMemo(
@@ -53,7 +59,7 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
 
   const [path, setPath] = useState(base);
   const [trashRel, setTrashRel] = useState("");
-  const [trashMode, setTrashMode] = useState(false);
+  const [trashMode, setTrashMode] = useState(!!initialTrashMode);
 
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -68,11 +74,11 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
   useEffect(() => {
     setPath(base);
     setTrashRel("");
-    setTrashMode(false);
+    setTrashMode(!!initialTrashMode);
     setItems([]);
     setMsg("");
     setErr("");
-  }, [client, base]);
+  }, [client, base, initialTrashMode]);
 
   const crumbs = useMemo(() => {
     const clean = trashMode ? normalize(trashRel) : normalize(path);
@@ -169,6 +175,11 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
     e.target.value = "";
     if (!file) return;
 
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setErr("File too large. Max upload is 25MB.");
+      return;
+    }
+
     setErr("");
     setMsg("Uploading...");
 
@@ -176,6 +187,9 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
       const base64 = await fileToBase64(file);
       await uploadBase64(client, path, file.name, base64, file.type || "");
       setMsg("Uploaded ✅");
+
+      if (typeof onUploaded === "function") onUploaded(file.name);
+
       await refresh(effectivePath);
     } catch (ex) {
       setMsg("");
@@ -216,7 +230,7 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
     setMsg("Restoring...");
 
     try {
-      await restoreFromTrash(client, trashRel, String(name).trim());
+      await restoreItem(client, trashRel, String(name).trim());
       setMsg("Restored ✅");
       await refresh(effectivePath);
     } catch (ex) {
@@ -228,12 +242,7 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
   async function handleDeleteFromTrash(name) {
     const scope = trashRel ? `TRASH / ${trashRel}` : "TRASH ROOT";
 
-    if (
-      !confirm(
-        `Permanently delete "${name}" from ${scope}?\n\nThis cannot be undone.`
-      )
-    )
-      return;
+    if (!confirm(`Permanently delete "${name}" from ${scope}?\n\nThis cannot be undone.`)) return;
 
     setErr("");
     setMsg("Deleting permanently...");
@@ -268,20 +277,19 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
 
   async function handleDownload(name) {
     setErr("");
-    setMsg("Downloading...");
+    setMsg("Preparing download...");
     try {
       const blob = await downloadFile(client, effectivePath, String(name).trim());
 
       const url = URL.createObjectURL(blob);
-
       const a = document.createElement("a");
       a.href = url;
       a.download = name;
       document.body.appendChild(a);
       a.click();
       a.remove();
-
       URL.revokeObjectURL(url);
+
       setMsg("");
     } catch (ex) {
       setMsg("");
@@ -290,15 +298,8 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
   }
 
   async function handleCreateFolder() {
-    if (!perms.canMkdir) {
-      setErr("Creating folders is disabled in this tab.");
-      return;
-    }
-
-    if (trashMode) {
-      setErr("Creating folders is disabled while viewing Trash.");
-      return;
-    }
+    if (!perms.canMkdir) return setErr("Creating folders is disabled in this tab.");
+    if (trashMode) return setErr("Creating folders is disabled while viewing Trash.");
 
     const folder = newFolderName.trim();
     if (!folder) return;
@@ -317,15 +318,8 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
   }
 
   async function handleCreateNote() {
-    if (!perms.canWriteText) {
-      setErr("Notes are disabled in this tab.");
-      return;
-    }
-
-    if (trashMode) {
-      setErr("Notes are disabled while viewing Trash.");
-      return;
-    }
+    if (!perms.canWriteText) return setErr("Notes are disabled in this tab.");
+    if (trashMode) return setErr("Notes are disabled while viewing Trash.");
 
     const fileName = newNoteName.trim() || "note.txt";
     const text = newNoteText || "";
@@ -347,180 +341,128 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
   const displayPath = trashMode ? `TRASH / ${trashRel || "(root)"}` : `FILES / ${path || "(tab root)"}`;
 
   return (
-    <div style={{ border: "1px solid #ddd", padding: 16, borderRadius: 8 }}>
-      {/* Top controls */}
-      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+    <div className="ui-card ui-card-pad">
+      <div className="ui-row" style={{ justifyContent: "space-between" }}>
         <div>
-          <strong>Path:</strong> <span style={{ fontFamily: "monospace" }}>{displayPath}</span>
+          <div className="ui-note">
+            <strong>Path:</strong> <span className="ui-mono">{displayPath}</span>
+          </div>
+
+          {/* Breadcrumbs */}
+          <div style={{ marginTop: 6 }} className="ui-note">
+            <span style={{ color: "#9ca3af" }}>{trashMode ? "TRASH" : "root"}</span>
+            {crumbs.map((c, i) => (
+              <span key={i}>
+                {" / "}
+                <span className="ui-link" onClick={() => goToCrumb(i)}>
+                  {c}
+                </span>
+              </span>
+            ))}
+          </div>
         </div>
 
-        <button onClick={() => refresh(effectivePath)} disabled={loading || !client}>
-          Refresh
-        </button>
-
-        <button
-          onClick={goUp}
-          disabled={loading || !crumbs.length || (!trashMode && atTabRoot) || (trashMode && atTrashRoot)}
-        >
-          Up
-        </button>
-
-        {!trashMode ? (
-          <button onClick={goTabRoot} disabled={loading || !client || atTabRoot}>
-            Go to tab root
+        <div className="ui-row">
+          <button className="ui-btn" onClick={() => refresh(effectivePath)} disabled={loading || !client}>
+            Refresh
           </button>
-        ) : (
-          <button onClick={goTrashRoot} disabled={loading || !client || atTrashRoot}>
-            Go to Trash root
-          </button>
-        )}
 
-        {/* Global Trash toggle */}
-        <button
-          onClick={() => {
-            setErr("");
-            setMsg("");
-            setTrashMode((v) => {
-              const next = !v;
-              if (next) setTrashRel("");
-              return next;
-            });
-          }}
-          disabled={loading || !client}
-          title="Global Trash for this client"
-        >
-          {trashMode ? "Back to Files" : "View Trash (Global)"}
-        </button>
-
-        {trashMode && (
-          <button onClick={handleEmptyTrash} disabled={loading || !client}>
-            Empty Trash
-          </button>
-        )}
-
-        {/* Upload */}
-        <label
-          style={{
-            border: "1px solid #ccc",
-            padding: "6px 10px",
-            borderRadius: 6,
-            cursor: perms.canUpload && !trashMode ? "pointer" : "not-allowed",
-            opacity: perms.canUpload && !trashMode ? 1 : 0.5,
-          }}
-          title={
-            trashMode
-              ? "Uploads disabled while viewing Trash"
-              : perms.canUpload
-              ? "Upload file"
-              : "Uploads disabled in this tab"
-          }
-        >
-          Upload file
-          <input
-            type="file"
-            onChange={handleUpload}
-            style={{ display: "none" }}
-            disabled={!perms.canUpload || trashMode}
-          />
-        </label>
-
-        <span
-          style={{
-            fontSize: 12,
-            padding: "4px 8px",
-            borderRadius: 999,
-            border: "1px solid #ddd",
-            color: "#555",
-            background: perms.canUpload || perms.canDelete || perms.canMkdir || perms.canWriteText ? "#fff" : "#f7f7f7",
-          }}
-          title="Tab permissions"
-        >
-          {perms.canUpload || perms.canDelete || perms.canMkdir || perms.canWriteText ? "Editable" : "Read-only"}
-        </span>
-
-        {trashMode && (
-          <span
-            style={{
-              fontSize: 12,
-              padding: "4px 8px",
-              borderRadius: 999,
-              border: "1px solid #f0c",
-              color: "#a00050",
-              background: "#fff5fb",
-            }}
-            title="Global Trash view for this client"
+          <button
+            className="ui-btn"
+            onClick={goUp}
+            disabled={loading || !crumbs.length || (!trashMode && atTabRoot) || (trashMode && atTrashRoot)}
           >
-            Global Trash
-          </span>
-        )}
+            Up
+          </button>
+
+          {!trashMode ? (
+            <button className="ui-btn" onClick={goTabRoot} disabled={loading || !client || atTabRoot}>
+              Tab root
+            </button>
+          ) : (
+            <button className="ui-btn" onClick={goTrashRoot} disabled={loading || !client || atTrashRoot}>
+              Trash root
+            </button>
+          )}
+
+          <button
+            className="ui-btn ui-btn-ghost"
+            onClick={() => {
+              setErr("");
+              setMsg("");
+              setTrashMode((v) => {
+                const next = !v;
+                if (next) setTrashRel("");
+                return next;
+              });
+            }}
+            disabled={loading || !client}
+            title="Global Trash for this client"
+          >
+            {trashMode ? "Back to Files" : "View Trash"}
+          </button>
+
+          {trashMode && (
+            <button className="ui-btn ui-btn-danger" onClick={handleEmptyTrash} disabled={loading || !client}>
+              Empty Trash
+            </button>
+          )}
+
+          <label className="ui-btn ui-btn-primary" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+            Upload
+            <input
+              type="file"
+              accept=".pdf,.png,.jpg,.jpeg"
+              onChange={handleUpload}
+              style={{ display: "none" }}
+              disabled={!perms.canUpload || trashMode}
+            />
+          </label>
+        </div>
       </div>
 
-      {/* Breadcrumbs */}
-      <div style={{ marginTop: 10, fontSize: 14 }}>
-        <span style={{ cursor: "default", color: "#999" }}>{trashMode ? "TRASH" : "root"}</span>
-
-        {crumbs.map((c, i) => (
-          <span key={i}>
-            {" / "}
-            <span style={{ cursor: "pointer", textDecoration: "underline" }} onClick={() => goToCrumb(i)}>
-              {c}
-            </span>
-          </span>
-        ))}
-      </div>
-
-      {msg && <div style={{ marginTop: 10, color: "#0a7" }}>{msg}</div>}
-      {err && <div style={{ marginTop: 10, color: "crimson", whiteSpace: "pre-wrap" }}>{err}</div>}
+      {uploadHint ? <div className="ui-note" style={{ marginTop: 10 }}>{uploadHint}</div> : null}
+      {msg ? <div style={{ marginTop: 10 }} className="ui-ok">{msg}</div> : null}
+      {err ? <div style={{ marginTop: 10 }} className="ui-err">{err}</div> : null}
 
       {/* Create tools */}
-      <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        <div
-          style={{
-            border: "1px solid #eee",
-            padding: 12,
-            borderRadius: 8,
-            opacity: perms.canMkdir && !trashMode ? 1 : 0.6,
-          }}
-        >
-          <div style={{ fontWeight: 600, marginBottom: 8 }}>New folder</div>
-          <div style={{ display: "flex", gap: 8 }}>
+      <div style={{ marginTop: 14 }} className="ui-grid-2">
+        <div className="ui-card ui-card-pad" style={{ boxShadow: "none" }}>
+          <div style={{ fontWeight: 800, marginBottom: 10 }}>New folder</div>
+          <div className="ui-row">
             <input
-              style={{ flex: 1, padding: 8 }}
+              className="ui-input"
+              style={{ flex: 1 }}
               placeholder="e.g. 08 Queries"
               value={newFolderName}
               onChange={(e) => setNewFolderName(e.target.value)}
               disabled={!perms.canMkdir || trashMode}
             />
-            <button onClick={handleCreateFolder} disabled={loading || !client || !perms.canMkdir || trashMode}>
+            <button className="ui-btn ui-btn-primary" onClick={handleCreateFolder} disabled={loading || !client || !perms.canMkdir || trashMode}>
               Create
             </button>
           </div>
         </div>
 
-        <div
-          style={{
-            border: "1px solid #eee",
-            padding: 12,
-            borderRadius: 8,
-            opacity: perms.canWriteText && !trashMode ? 1 : 0.6,
-          }}
-        >
-          <div style={{ fontWeight: 600, marginBottom: 8 }}>New note</div>
+        <div className="ui-card ui-card-pad" style={{ boxShadow: "none" }}>
+          <div style={{ fontWeight: 800, marginBottom: 10 }}>New note</div>
           <input
-            style={{ width: "100%", padding: 8, marginBottom: 8 }}
+            className="ui-input"
             placeholder="File name (e.g. client-note.txt)"
             value={newNoteName}
             onChange={(e) => setNewNoteName(e.target.value)}
             disabled={!perms.canWriteText || trashMode}
           />
+          <div style={{ height: 10 }} />
           <textarea
-            style={{ width: "100%", padding: 8, minHeight: 70, marginBottom: 8 }}
+            className="ui-textarea"
             placeholder="Type your note..."
             value={newNoteText}
             onChange={(e) => setNewNoteText(e.target.value)}
             disabled={!perms.canWriteText || trashMode}
           />
-          <button onClick={handleCreateNote} disabled={loading || !client || !perms.canWriteText || trashMode}>
+          <div style={{ height: 10 }} />
+          <button className="ui-btn ui-btn-primary" onClick={handleCreateNote} disabled={loading || !client || !perms.canWriteText || trashMode}>
             Save note
           </button>
         </div>
@@ -529,31 +471,25 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
       {/* File list */}
       <div style={{ marginTop: 14 }}>
         {loading ? (
-          <div>Loading…</div>
+          <div className="ui-note">Loading…</div>
         ) : items.length === 0 ? (
-          <div>{trashMode ? "Trash is empty ✅" : "No files/folders here yet."}</div>
+          <div className="ui-note">{trashMode ? "Trash is empty ✅" : "No files/folders here yet."}</div>
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <table className="ui-table">
             <thead>
               <tr>
-                <th align="left" style={{ borderBottom: "1px solid #eee", padding: 8 }}>
-                  Name
-                </th>
-                <th align="left" style={{ borderBottom: "1px solid #eee", padding: 8 }}>
-                  Type
-                </th>
-                <th align="left" style={{ borderBottom: "1px solid #eee", padding: 8 }}>
-                  Actions
-                </th>
+                <th>Name</th>
+                <th style={{ width: 120 }}>Type</th>
+                <th style={{ width: 320 }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {items.map((it) => (
                 <tr key={it.name}>
-                  <td style={{ borderBottom: "1px solid #f2f2f2", padding: 8 }}>
+                  <td>
                     {it.type === "dir" ? (
                       <span
-                        style={{ cursor: "pointer", textDecoration: "underline" }}
+                        className="ui-link"
                         onClick={() => {
                           if (trashMode) setTrashRel(joinPath(trashRel, it.name));
                           else safeSetPath(joinPath(path, it.name));
@@ -567,26 +503,38 @@ export default function ServiceFileBrowser({ client, basePath, permissions }) {
                     )}
                   </td>
 
-                  <td style={{ borderBottom: "1px solid #f2f2f2", padding: 8 }}>{it.type}</td>
+                  <td className="ui-note">{it.type}</td>
 
-                  <td style={{ borderBottom: "1px solid #f2f2f2", padding: 8 }}>
+                  <td>
                     {trashMode ? (
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        {it.type === "file" && <button onClick={() => handleDownload(it.name)}>Download</button>}
-                        <button onClick={() => handleRestore(it.name)}>Restore</button>
-                        <button onClick={() => handleDeleteFromTrash(it.name)}>Delete</button>
+                      <div className="ui-row">
+                        {it.type === "file" && (
+                          <button className="ui-btn" onClick={() => handleDownload(it.name)}>
+                            Download
+                          </button>
+                        )}
+                        <button className="ui-btn ui-btn-primary" onClick={() => handleRestore(it.name)}>
+                          Restore
+                        </button>
+                        <button className="ui-btn ui-btn-danger" onClick={() => handleDeleteFromTrash(it.name)}>
+                          Delete
+                        </button>
                       </div>
                     ) : it.type === "file" ? (
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        <button onClick={() => handleDownload(it.name)}>Download</button>
-                        <button onClick={() => handleTrash(it.name)} disabled={!perms.canDelete}>
+                      <div className="ui-row">
+                        <button className="ui-btn" onClick={() => handleDownload(it.name)}>
+                          Download
+                        </button>
+                        <button className="ui-btn" onClick={() => handleTrash(it.name)} disabled={!perms.canDelete}>
                           Trash
                         </button>
                       </div>
                     ) : (
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        <button onClick={() => safeSetPath(joinPath(path, it.name))}>Open</button>
-                        <button onClick={() => handleTrash(it.name)} disabled={!perms.canDelete}>
+                      <div className="ui-row">
+                        <button className="ui-btn ui-btn-primary" onClick={() => safeSetPath(joinPath(path, it.name))}>
+                          Open
+                        </button>
+                        <button className="ui-btn" onClick={() => handleTrash(it.name)} disabled={!perms.canDelete}>
                           Trash
                         </button>
                       </div>

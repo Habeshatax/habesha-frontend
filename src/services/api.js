@@ -1,153 +1,227 @@
 // src/services/api.js (FULL FILE)
 
-const RAW = (import.meta.env.VITE_API_URL || "").trim();
+export const API_URL =
+  import.meta.env.VITE_API_URL || "https://habeshaweb.onrender.com";
 
-const API_URL = (RAW ||
-  (import.meta.env.DEV ? "http://localhost:8787" : "https://habeshaweb.onrender.com")
-).replace(/\/+$/, "");
+// -------------------------
+// Token helpers
+// -------------------------
+function readToken() {
+  return localStorage.getItem("token") || sessionStorage.getItem("token") || "";
+}
 
-console.log("API_URL =", API_URL);
+function authHeaders() {
+  const token = readToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
-async function apiFetch(path, options = {}) {
-  const token = localStorage.getItem("token") || sessionStorage.getItem("token");
+// -------------------------
+// Core request helper
+// -------------------------
+async function request(path, { method = "GET", body, auth = true } = {}) {
+  const headers = {
+    "Content-Type": "application/json",
+    ...(auth ? authHeaders() : {}),
+  };
 
-  const headers = { ...(options.headers || {}) };
+  const res = await fetch(`${API_URL}${path}`, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+  });
 
-  if (options.body && typeof options.body === "string") {
-    headers["Content-Type"] = headers["Content-Type"] || "application/json";
-  }
-
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-
-  const res = await fetch(`${API_URL}${path}`, { ...options, headers });
-
-  if (options.expectBlob) {
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(text || `Request failed (${res.status})`);
-    }
-    return res.blob();
-  }
-
-  const text = await res.text().catch(() => "");
-  let data = null;
+  const text = await res.text();
+  let data = {};
 
   try {
-    data = text ? JSON.parse(text) : null;
+    data = text ? JSON.parse(text) : {};
   } catch {
-    data = { raw: text };
+    data = { error: text || `HTTP ${res.status}` };
   }
 
   if (!res.ok) {
-    const msg = data?.error || data?.message || text || `Request failed (${res.status})`;
-    throw new Error(msg);
+    throw new Error(data?.error || `HTTP ${res.status}`);
   }
 
   return data;
 }
 
-/* --------------------------
-   AUTH
--------------------------- */
+// ======================================================
+// AUTH
+// ======================================================
 
-export async function loginRequest(email, password) {
-  return apiFetch("/login", {
+// Admin login (PUBLIC)
+export function loginRequest(email, password) {
+  return request("/login", {
     method: "POST",
-    body: JSON.stringify({ email, password }),
+    auth: false,
+    body: { email, password },
   });
 }
 
-// ✅ Client login (single client for now)
-export async function clientLoginRequest(email, password) {
-  return apiFetch("/client-login", {
+// Client login (PUBLIC)
+export function clientLoginRequest(email, password) {
+  return request("/client-login", {
     method: "POST",
-    body: JSON.stringify({ email, password }),
+    auth: false,
+    body: { email, password },
   });
 }
 
-export async function getMe() {
-  return apiFetch("/api/me", { method: "GET" });
-}
-
-/* --------------------------
-   CLIENTS (admin only)
--------------------------- */
-
-export async function listClients() {
-  return apiFetch("/api/clients", { method: "GET" });
-}
-
-export async function createClient(payload) {
-  return apiFetch("/api/clients", {
+// ✅ Client registration (PUBLIC)
+// 🔥 THIS IS WHAT AuthContext EXPECTS
+export function clientRegister(payload) {
+  return request("/client-register", {
     method: "POST",
-    body: JSON.stringify(payload),
+    auth: false,
+    body: payload,
   });
 }
 
-/* --------------------------
-   FILE BROWSER
--------------------------- */
+// alias (safe to keep)
+export const registerClientRequest = clientRegister;
 
-export async function listClientItems(client, path = "") {
-  const qs = path ? `?path=${encodeURIComponent(path)}` : "";
-  return apiFetch(`/api/clients/${encodeURIComponent(client)}/files${qs}`, { method: "GET" });
+// Get current user (PROTECTED)
+export function getMe() {
+  return request("/api/me", { method: "GET" });
 }
 
-export async function uploadBase64(client, path = "", fileName, base64, contentType = "") {
-  const qs = path ? `?path=${encodeURIComponent(path)}` : "";
-  return apiFetch(`/api/clients/${encodeURIComponent(client)}/uploadBase64${qs}`, {
+// ======================================================
+// ADMIN – CLIENTS
+// ======================================================
+
+export function listClients() {
+  return request("/api/clients", { method: "GET" });
+}
+
+export function createClient(payload) {
+  return request("/api/clients", {
     method: "POST",
-    body: JSON.stringify({ fileName, base64, contentType }),
+    body: payload,
   });
 }
 
-export async function createFolder(client, path = "", name) {
-  const qs = path ? `?path=${encodeURIComponent(path)}` : "";
-  return apiFetch(`/api/clients/${encodeURIComponent(client)}/mkdir${qs}`, {
-    method: "POST",
-    body: JSON.stringify({ name }),
-  });
+// ======================================================
+// FILE BROWSER
+// ======================================================
+
+export function listClientItems(client, path = "") {
+  const q = new URLSearchParams();
+  if (path) q.set("path", path);
+
+  return request(
+    `/api/clients/${encodeURIComponent(client)}/files?${q.toString()}`,
+    { method: "GET" }
+  );
 }
 
-export async function createTextFile(client, path = "", fileName, text) {
-  const qs = path ? `?path=${encodeURIComponent(path)}` : "";
-  return apiFetch(`/api/clients/${encodeURIComponent(client)}/writeText${qs}`, {
-    method: "POST",
-    body: JSON.stringify({ fileName, text }),
-  });
+export function createFolder(client, path = "", name) {
+  const q = new URLSearchParams();
+  if (path) q.set("path", path);
+
+  return request(
+    `/api/clients/${encodeURIComponent(client)}/mkdir?${q.toString()}`,
+    {
+      method: "POST",
+      body: { name },
+    }
+  );
 }
 
-export async function downloadFile(client, path = "", fileName) {
-  const qs = `?file=${encodeURIComponent(fileName)}${path ? `&path=${encodeURIComponent(path)}` : ""}`;
-  return apiFetch(`/api/clients/${encodeURIComponent(client)}/download${qs}`, {
-    method: "GET",
-    expectBlob: true,
-  });
+export function createTextFile(client, path = "", fileName, text) {
+  const q = new URLSearchParams();
+  if (path) q.set("path", path);
+
+  return request(
+    `/api/clients/${encodeURIComponent(client)}/writeText?${q.toString()}`,
+    {
+      method: "POST",
+      body: { fileName, text },
+    }
+  );
 }
 
-export async function trashItem(client, path = "", name) {
-  const qs = path ? `?path=${encodeURIComponent(path)}` : "";
-  return apiFetch(`/api/clients/${encodeURIComponent(client)}/trash${qs}`, {
-    method: "POST",
-    body: JSON.stringify({ name: String(name || "").trim() }),
-  });
+export function uploadBase64(client, path = "", fileName, base64, contentType = "") {
+  const q = new URLSearchParams();
+  if (path) q.set("path", path);
+
+  return request(
+    `/api/clients/${encodeURIComponent(client)}/uploadBase64?${q.toString()}`,
+    {
+      method: "POST",
+      body: { fileName, base64, contentType },
+    }
+  );
 }
 
-export async function restoreFromTrash(client, path = "", name) {
-  const qs = `?name=${encodeURIComponent(String(name || "").trim())}${
-    path ? `&path=${encodeURIComponent(path)}` : ""
-  }`;
-  return apiFetch(`/api/clients/${encodeURIComponent(client)}/restore${qs}`, { method: "POST" });
+export async function downloadFile(client, path = "", file) {
+  const q = new URLSearchParams();
+  if (path) q.set("path", path);
+  q.set("file", file);
+
+  const res = await fetch(
+    `${API_URL}/api/clients/${encodeURIComponent(client)}/download?${q.toString()}`,
+    {
+      headers: authHeaders(),
+    }
+  );
+
+  if (!res.ok) throw new Error("Download failed");
+
+  return await res.blob();
 }
 
-export async function emptyTrash(client, path = "") {
-  const qs = path ? `?path=${encodeURIComponent(path)}` : "";
-  return apiFetch(`/api/clients/${encodeURIComponent(client)}/trash${qs}`, { method: "DELETE" });
+// ======================================================
+// TRASH
+// ======================================================
+
+export function trashItem(client, path = "", name) {
+  const q = new URLSearchParams();
+  if (path) q.set("path", path);
+
+  return request(
+    `/api/clients/${encodeURIComponent(client)}/trash?${q.toString()}`,
+    {
+      method: "POST",
+      body: { name },
+    }
+  );
 }
 
-export async function deleteTrashItem(client, path = "", name) {
-  const qs = `?name=${encodeURIComponent(String(name || "").trim())}${
-    path ? `&path=${encodeURIComponent(path)}` : ""
-  }`;
-  return apiFetch(`/api/clients/${encodeURIComponent(client)}/trashItem${qs}`, { method: "DELETE" });
+export function restoreItem(client, path = "", name) {
+  const q = new URLSearchParams();
+  if (path) q.set("path", path);
+
+  return request(
+    `/api/clients/${encodeURIComponent(client)}/restore?${q.toString()}`,
+    {
+      method: "POST",
+      body: { name },
+    }
+  );
+}
+
+export function emptyTrash(client, path = "") {
+  const q = new URLSearchParams();
+  if (path) q.set("path", path);
+
+  return request(
+    `/api/clients/${encodeURIComponent(client)}/trash?${q.toString()}`,
+    {
+      method: "DELETE",
+    }
+  );
+}
+
+export function deleteTrashItem(client, path = "", name) {
+  const q = new URLSearchParams();
+  if (path) q.set("path", path);
+  q.set("name", name);
+
+  return request(
+    `/api/clients/${encodeURIComponent(client)}/trashItem?${q.toString()}`,
+    {
+      method: "DELETE",
+    }
+  );
 }
