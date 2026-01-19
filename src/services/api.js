@@ -68,8 +68,7 @@ export function clientLoginRequest(email, password) {
   });
 }
 
-// ✅ Client registration (PUBLIC)
-// 🔥 THIS IS WHAT AuthContext EXPECTS
+// Client registration (PUBLIC)
 export function clientRegister(payload) {
   return request("/client-register", {
     method: "POST",
@@ -180,20 +179,19 @@ export async function downloadFile(client, path = "", file) {
 }
 
 // ======================================================
-// DELETE FILE (Needed by ClientFiles.jsx)
+// DELETE FILE (matches your backend)
 // ======================================================
-
-// ✅ ClientFiles.jsx expects: import { deleteFile } from "../services/api";
-// This matches your existing "file browser" route structure.
-// It deletes a file from a client folder at a given path.
+// Your backend does NOT support DELETE /api/clients/:client/file
+// So "delete" should mean "move to Trash":
+// POST /api/clients/:client/trash?path=...  body: { name }
 export function deleteFile(client, path = "", name) {
   const q = new URLSearchParams();
   if (path) q.set("path", path);
 
   return request(
-    `/api/clients/${encodeURIComponent(client)}/file?${q.toString()}`,
+    `/api/clients/${encodeURIComponent(client)}/trash?${q.toString()}`,
     {
-      method: "DELETE",
+      method: "POST",
       body: { name },
     }
   );
