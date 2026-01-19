@@ -1,14 +1,8 @@
-// src/pages/ClientFiles.jsx
+// src/pages/ClientFiles.jsx (FULL FILE)
 
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import {
-  deleteFile,
-  downloadFile,
-  listClientItems,
-  uploadBase64,
-} from "../services/api";
-
+import { deleteFile, downloadFile, listClientItems, uploadBase64 } from "../services/api";
 
 function fileToBase64DataUrl(file) {
   return new Promise((resolve, reject) => {
@@ -19,9 +13,23 @@ function fileToBase64DataUrl(file) {
   });
 }
 
+function triggerBrowserDownload(blob, fileName) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName || "download";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 export default function ClientFiles() {
   const params = useParams();
   const client = useMemo(() => decodeURIComponent(params.client || ""), [params]);
+
+  // Optional: later you can support folders with a "path" state
+  const [path, setPath] = useState(""); // "" = client root
 
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -32,10 +40,10 @@ export default function ClientFiles() {
     setError("");
     setLoading(true);
     try {
-      const data = await listClientFiles(client);
+      const data = await listClientItems(client, path);
       setItems(data.items || []);
     } catch (e) {
-      setError(e.message || "Failed to load files");
+      setError(e?.message || "Failed to load files");
     } finally {
       setLoading(false);
     }
@@ -44,7 +52,7 @@ export default function ClientFiles() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client]);
+  }, [client, path]);
 
   async function onUpload(e) {
     const file = e.target.files?.[0];
@@ -54,26 +62,40 @@ export default function ClientFiles() {
     setError("");
     try {
       const base64 = await fileToBase64DataUrl(file);
-      await uploadClientFileBase64(client, file.name, base64);
+      await uploadBase64(client, path, file.name, base64, file.type || "");
       await load();
     } catch (err) {
-      setError(err.message || "Upload failed");
+      setError(err?.message || "Upload failed");
     } finally {
       setBusy(false);
-      e.target.value = ""; // reset input
+      e.target.value = "";
     }
   }
 
   async function onDelete(fileName) {
-    if (!confirm(`Delete "${fileName}"?`)) return;
+    if (!confirm(`Move "${fileName}" to Trash?`)) return;
 
     setBusy(true);
     setError("");
     try {
-      await deleteClientFile(client, fileName);
+      // deleteFile is mapped to backend /trash route in api.js
+      await deleteFile(client, path, fileName);
       await load();
     } catch (err) {
-      setError(err.message || "Delete failed");
+      setError(err?.message || "Delete failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onDownload(fileName) {
+    setBusy(true);
+    setError("");
+    try {
+      const blob = await downloadFile(client, path, fileName);
+      triggerBrowserDownload(blob, fileName);
+    } catch (err) {
+      setError(err?.message || "Download failed");
     } finally {
       setBusy(false);
     }
@@ -93,18 +115,13 @@ export default function ClientFiles() {
         Client: <strong>{client}</strong>
       </p>
 
-      {error && (
-        <div style={{ color: "crimson", margin: "12px 0" }}>{error}</div>
-      )}
+      <p style={{ marginTop: 0, opacity: 0.8 }}>
+        Folder: <strong>{path || "(root)"}</strong>
+      </p>
 
-      <div
-        style={{
-          display: "flex",
-          gap: 12,
-          alignItems: "center",
-          marginTop: 16,
-        }}
-      >
+      {error && <div style={{ color: "crimson", margin: "12px 0" }}>{error}</div>}
+
+      <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 16 }}>
         <label style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
           <span>Upload file:</span>
           <input type="file" onChange={onUpload} disabled={busy} />
@@ -125,9 +142,36 @@ export default function ClientFiles() {
       ) : (
         <ul style={{ paddingLeft: 18 }}>
           {dirs.map((d) => (
-            <li key={d.name}>{d.name}</li>
+            <li key={d.name} style={{ marginBottom: 6 }}>
+              <button
+                onClick={() => setPath(path ? `${path}/${d.name}` : d.name)}
+                disabled={busy}
+                style={{ cursor: "pointer" }}
+              >
+                Open
+              </button>{" "}
+              <span style={{ marginLeft: 8 }}>{d.name}</span>
+            </li>
           ))}
         </ul>
+      )}
+
+      {path && (
+        <div style={{ marginTop: 12 }}>
+          <button
+            onClick={() => {
+              const parts = path.split("/").filter(Boolean);
+              parts.pop();
+              setPath(parts.join("/"));
+            }}
+            disabled={busy}
+          >
+            ↑ Up one folder
+          </button>{" "}
+          <button onClick={() => setPath("")} disabled={busy}>
+            Back to root
+          </button>
+        </div>
       )}
 
       <h2 style={{ marginTop: 24 }}>Files</h2>
@@ -148,18 +192,11 @@ export default function ClientFiles() {
           <tbody>
             {files.map((f) => (
               <tr key={f.name}>
+                <td style={{ borderBottom: "1px solid #eee", padding: 8 }}>{f.name}</td>
                 <td style={{ borderBottom: "1px solid #eee", padding: 8 }}>
-                  {f.name}
-                </td>
-                <td style={{ borderBottom: "1px solid #eee", padding: 8 }}>
-                  <a
-                    href={getDownloadUrl(client, f.name)}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{ marginRight: 12 }}
-                  >
+                  <button onClick={() => onDownload(f.name)} disabled={busy} style={{ marginRight: 12 }}>
                     Download
-                  </a>
+                  </button>
                   <button onClick={() => onDelete(f.name)} disabled={busy}>
                     Delete
                   </button>
