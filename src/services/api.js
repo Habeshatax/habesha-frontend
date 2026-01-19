@@ -141,7 +141,13 @@ export function createTextFile(client, path = "", fileName, text) {
   );
 }
 
-export function uploadBase64(client, path = "", fileName, base64, contentType = "") {
+export function uploadBase64(
+  client,
+  path = "",
+  fileName,
+  base64,
+  contentType = ""
+) {
   const q = new URLSearchParams();
   if (path) q.set("path", path);
 
@@ -160,7 +166,9 @@ export async function downloadFile(client, path = "", file) {
   q.set("file", file);
 
   const res = await fetch(
-    `${API_URL}/api/clients/${encodeURIComponent(client)}/download?${q.toString()}`,
+    `${API_URL}/api/clients/${encodeURIComponent(
+      client
+    )}/download?${q.toString()}`,
     {
       headers: authHeaders(),
     }
@@ -169,6 +177,26 @@ export async function downloadFile(client, path = "", file) {
   if (!res.ok) throw new Error("Download failed");
 
   return await res.blob();
+}
+
+// ======================================================
+// DELETE FILE (Needed by ClientFiles.jsx)
+// ======================================================
+
+// ✅ ClientFiles.jsx expects: import { deleteFile } from "../services/api";
+// This matches your existing "file browser" route structure.
+// It deletes a file from a client folder at a given path.
+export function deleteFile(client, path = "", name) {
+  const q = new URLSearchParams();
+  if (path) q.set("path", path);
+
+  return request(
+    `/api/clients/${encodeURIComponent(client)}/file?${q.toString()}`,
+    {
+      method: "DELETE",
+      body: { name },
+    }
+  );
 }
 
 // ======================================================
